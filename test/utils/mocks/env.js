@@ -26,6 +26,9 @@ const env = {
   S3_ACCESS_KEY_ID: 'an-id',
   S3_SECRET_ACCESS_KEY: 'too-many-secrets',
   IMS_ORIGIN: 'https://ims-na1.adobelogin.com',
+  DA_DOMAIN: 'ssa-da.live',
+  HLX_PROD_SERVER_HOST_PAGE: 'gov-aem.page',
+  HLX_PROD_SERVER_HOST_LIVE: 'gov-aem.live',
   DA_AUTH: {
     get: (kvNamespace) => {
       return NAMESPACES[kvNamespace];

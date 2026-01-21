@@ -1,4 +1,5 @@
 name = "da-admin"
+account_id = "980b8b7745c7f2165f369b9d6f3c61f5"
 main = "src/index.js"
 compatibility_date = "2024-11-11"
 keep_vars = true
@@ -52,3 +53,84 @@ kv_namespaces = [
 r2_buckets = [
   { binding = "AEM_CONTENT", bucket_name = "aem-content-dev" }
 ]
+# === AMS Environments ===
+# === DEV ENVIRONMENT ===
+########################################################
+[env.ams-dev]
+
+services = [
+  { binding = "dacollab", service = "da-collab-local" }
+]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "3fd71e1a1bab44c290c5fbd00e3515ff" },
+  { binding = "DA_CONFIG", id = "b07fd143ed274cdeadcfa47c9062fb19" },
+  { binding = "DA_JOBS", id = "1e3250086f504951a157bc8fe7e38383" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-dev" }
+]
+
+[env.ams-dev.vars]
+ENVIRONMENT = "ams-dev"
+DA_DOMAIN = "ssa-da.live"
+DA_COLLAB = "http://localhost:4711"
+AEM_BUCKET_NAME = "aem-content-dev"
+HLX_PROD_SERVER_HOST_PAGE = "gov-aem.page"
+HLX_PROD_SERVER_HOST_LIVE = "gov-aem.live"
+
+# === STAGE ENVIRONMENT ===
+########################################################
+[env.ams-stage]
+
+#services = [
+#  { binding = "dacollab", service = "da-collab-stage" }
+#]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "3fd71e1a1bab44c290c5fbd00e3515ff" },
+  { binding = "DA_CONFIG", id = "b07fd143ed274cdeadcfa47c9062fb19" },
+  { binding = "DA_JOBS", id = "1e3250086f504951a157bc8fe7e38383" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-stage" }
+]
+
+[env.ams-stage.vars]
+ENVIRONMENT = "ams-stage"
+DA_DOMAIN = "stg.ssa-da.live"
+DA_COLLAB = "https://collab.stg.ssa-da.live"
+AEM_BUCKET_NAME = "aem-content-stage"
+HLX_PROD_SERVER_HOST_PAGE = "gov-aem.page"
+HLX_PROD_SERVER_HOST_LIVE = "gov-aem.live"
+S3_DEF_URL = "https://980b8b7745c7f2165f369b9d6f3c61f5.r2.cloudflarestorage.com"
+# S3_ACCESS_KEY_ID = "set via secret"
+# S3_SECRET_ACCESS_KEY = "set via secret"
+
+# === PROD ENVIRONMENT ===
+########################################################
+[env.ams-prod]
+
+services = [
+  { binding = "dacollab", service = "da-collab-prod" }
+]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "????????" },
+  { binding = "DA_CONFIG", id = "????????" },
+  { binding = "DA_JOBS", id = "????????" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-prod" }
+]
+
+[env.ams-prod.vars]
+ENVIRONMENT = "ams-prod"
+DA_DOMAIN = "ssa-da.live"
+DA_COLLAB = "https://collab.ssa-da.live"
+AEM_BUCKET_NAME = "aem-content-prod"
+HLX_PROD_SERVER_HOST_PAGE = "ssa-aem.page"
+HLX_PROD_SERVER_HOST_LIVE = "ssa-aem.live"

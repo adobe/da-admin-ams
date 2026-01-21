@@ -13,24 +13,25 @@ import { FORM_TYPES } from '../utils/constants.js';
 
 /**
  * Builds a source response
- * @param {*} key
+ * @param {*} env
+ * @param {*} daCtx
  */
-export function sourceRespObject(daCtx) {
+export function sourceRespObject(env, daCtx) {
   const {
     org, site, isFile, pathname, aemPathname,
   } = daCtx;
 
   const obj = {
     source: {
-      editUrl: `https://da.live/${isFile ? 'edit#/' : ''}${org}${pathname}`,
-      contentUrl: `https://content.da.live/${org}${pathname}`,
+      editUrl: `https://${env.DA_DOMAIN}/${isFile ? 'edit#/' : ''}${org}${pathname}`,
+      contentUrl: `https://content.${env.DA_DOMAIN}/${org}${pathname}`,
     },
   };
 
   if (site) {
     obj.aem = {
-      previewUrl: `https://main--${site}--${org}.hlx.page${aemPathname}`,
-      liveUrl: `https://main--${site}--${org}.hlx.live${aemPathname}`,
+      previewUrl: `https://main--${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}${aemPathname}`,
+      liveUrl: `https://main--${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}${aemPathname}`,
     };
   }
 
