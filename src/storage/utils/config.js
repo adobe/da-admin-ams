@@ -10,9 +10,12 @@
  * governing permissions and limitations under the License.
  */
 export default function getS3Config(env) {
+  // Construct R2 endpoint URL from account ID
+  const endpoint = env.S3_DEF_URL || `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+  
   return {
     region: 'auto',
-    endpoint: env.S3_DEF_URL,
+    endpoint,
     credentials: {
       accessKeyId: env.S3_ACCESS_KEY_ID,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
