@@ -13,8 +13,8 @@
     "lint": "eslint .",
     "test": "c8 mocha --spec=test/**/*.test.js",
     "dev": "wrangler dev",
-    "deploy:prod": "wrangler deploy",
-    "deploy:stage": "wrangler deploy --env stage",
+    "deploy:prod": "wrangler deploy --env gov-prod",
+    "deploy:stage": "wrangler deploy --env gov-stage",
     "start": "wrangler dev"
   },
   "author": "",
@@ -34,9 +34,10 @@
     "*.cjs": "eslint"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.456.0",
+    "@aws-sdk/client-s3": "^3.981.0",
     "@aws-sdk/s3-request-presigner": "^3.468.0",
     "@ssttevee/cfw-formdata-polyfill": "^0.2.1",
+    "glob": "^13.0.1",
     "jose": "^6.0.10"
   }
 }

@@ -1,92 +1,29 @@
-name = "da-admin"
-account_id = "980b8b7745c7f2165f369b9d6f3c61f5"
+name = "da-admin-ams"
 main = "src/index.js"
 compatibility_date = "2024-11-11"
+
+# Note: account_id, keep_vars, and environment-specific config are set per environment below
+
+# [secrets]
+# Secrets must be set via: wrangler secret put SECRET_NAME --env ENVIRONMENT
+# Required secrets per environment:
+# - S3_ACCESS_KEY_ID
+# - S3_SECRET_ACCESS_KEY
+# - IMS_ORIGIN
+
+[dev]
+port = 8787
+
+# === GOV STAGE ENVIRONMENT ===
+########################################################
+[env.gov-stage]
+account_id = "980b8b7745c7f2165f369b9d6f3c61f5" # GovCloud Stage account
 keep_vars = true
 
-vars = { DA_COLLAB = "https://collab.da.page", AEM_BUCKET_NAME = "aem-content" }
-
-services = [
-  { binding = "dacollab", service = "da-collab" }
-]
-
-kv_namespaces = [
-  { binding = "DA_AUTH", id = "f8978fd2270f4c4fbcc8c9f04248a034" },
-  { binding = "DA_CONFIG", id = "a20824737cd8499bae0f0d887ac6db21" },
-  { binding = "DA_JOBS", id = "7056c4ab4e0c4604b6304607404eba1a" }
-]
-
-r2_buckets = [
-  { binding = "AEM_CONTENT", bucket_name = "aem-content" }
-]
-
-[env.stage]
-vars = { ENVIRONMENT = "stage", DA_COLLAB = "https://collab.da.page", AEM_BUCKET_NAME = "aem-content-stage" }
-
-services = [
-  { binding = "dacollab", service = "da-collab-stage" }
-]
-
-kv_namespaces = [
-  { binding = "DA_AUTH", id = "f5cc4d0150ac48d5b56948b5d147c77e" },
-  { binding = "DA_CONFIG", id = "3f6f6db5c27348fabee7c2a8ed39be17" },
-  { binding = "DA_JOBS", id = "66265e68cb2b422d8dc7a34b9fe2b0c9" }
-]
-
-r2_buckets = [
-  { binding = "AEM_CONTENT", bucket_name = "aem-content-stage" }
-]
-
-[env.dev]
-vars = { ENVIRONMENT = "dev", DA_COLLAB = "http://localhost:4711", AEM_BUCKET_NAME = "aem-content-dev" }
-
-services = [
-  { binding = "dacollab", service = "da-collab-local" }
-]
-
-kv_namespaces = [
-  { binding = "DA_AUTH", id = "f5cc4d0150ac48d5b56948b5d147c77e" },
-  { binding = "DA_CONFIG", id = "3f6f6db5c27348fabee7c2a8ed39be17" },
-  { binding = "DA_JOBS", id = "66265e68cb2b422d8dc7a34b9fe2b0c9" }
-]
-
-r2_buckets = [
-  { binding = "AEM_CONTENT", bucket_name = "aem-content-dev" }
-]
-# === AMS Environments ===
-# === DEV ENVIRONMENT ===
-########################################################
-[env.ams-dev]
-
-services = [
-  { binding = "dacollab", service = "da-collab-local" }
-]
-
-kv_namespaces = [
-  { binding = "DA_AUTH", id = "3fd71e1a1bab44c290c5fbd00e3515ff" },
-  { binding = "DA_CONFIG", id = "b07fd143ed274cdeadcfa47c9062fb19" },
-  { binding = "DA_JOBS", id = "1e3250086f504951a157bc8fe7e38383" }
-]
-
-r2_buckets = [
-  { binding = "AEM_CONTENT", bucket_name = "aem-content-dev" }
-]
-
-[env.ams-dev.vars]
-ENVIRONMENT = "ams-dev"
-DA_DOMAIN = "ssa-da.live"
-DA_COLLAB = "http://localhost:4711"
-AEM_BUCKET_NAME = "aem-content-dev"
-HLX_PROD_SERVER_HOST_PAGE = "gov-aem.page"
-HLX_PROD_SERVER_HOST_LIVE = "gov-aem.live"
-
-# === STAGE ENVIRONMENT ===
-########################################################
-[env.ams-stage]
-
-#services = [
-#  { binding = "dacollab", service = "da-collab-stage" }
-#]
+# Service bindings (commented out until da-collab is deployed)
+# services = [
+#   { binding = "dacollab", service = "da-collab-ams-gov-stage" }
+# ]
 
 kv_namespaces = [
   { binding = "DA_AUTH", id = "3fd71e1a1bab44c290c5fbd00e3515ff" },
@@ -98,39 +35,46 @@ r2_buckets = [
   { binding = "AEM_CONTENT", bucket_name = "aem-content-stage" }
 ]
 
-[env.ams-stage.vars]
-ENVIRONMENT = "ams-stage"
+[env.gov-stage.vars]
+ENVIRONMENT = "gov-stage"
 DA_DOMAIN = "stg.ssa-da.live"
-DA_COLLAB = "https://collab.stg.ssa-da.live"
+DA_COLLAB = "stg-collab.ssa-da.live"
 AEM_BUCKET_NAME = "aem-content-stage"
 HLX_PROD_SERVER_HOST_PAGE = "gov-aem.page"
 HLX_PROD_SERVER_HOST_LIVE = "gov-aem.live"
-S3_DEF_URL = "https://980b8b7745c7f2165f369b9d6f3c61f5.r2.cloudflarestorage.com"
-# S3_ACCESS_KEY_ID = "set via secret"
-# S3_SECRET_ACCESS_KEY = "set via secret"
+CF_ACCOUNT_ID = "980b8b7745c7f2165f369b9d6f3c61f5"
+# S3_ACCESS_KEY_ID = "set via wrangler secret put"
+# S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
+# IMS_ORIGIN = "set via wrangler secret put"
 
-# === PROD ENVIRONMENT ===
+# === GOV PROD ENVIRONMENT ===
 ########################################################
-[env.ams-prod]
+[env.gov-prod]
+account_id = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID" # GovCloud Prod account - UPDATE WHEN AVAILABLE
+keep_vars = true
 
 services = [
-  { binding = "dacollab", service = "da-collab-prod" }
+  { binding = "dacollab", service = "da-collab-ams-gov-prod" }
 ]
 
 kv_namespaces = [
-  { binding = "DA_AUTH", id = "????????" },
-  { binding = "DA_CONFIG", id = "????????" },
-  { binding = "DA_JOBS", id = "????????" }
+  { binding = "DA_AUTH", id = "REPLACE_WITH_PROD_KV_AUTH_ID" },
+  { binding = "DA_CONFIG", id = "REPLACE_WITH_PROD_KV_CONFIG_ID" },
+  { binding = "DA_JOBS", id = "REPLACE_WITH_PROD_KV_JOBS_ID" }
 ]
 
 r2_buckets = [
   { binding = "AEM_CONTENT", bucket_name = "aem-content-prod" }
 ]
 
-[env.ams-prod.vars]
-ENVIRONMENT = "ams-prod"
+[env.gov-prod.vars]
+ENVIRONMENT = "gov-prod"
 DA_DOMAIN = "ssa-da.live"
 DA_COLLAB = "https://collab.ssa-da.live"
 AEM_BUCKET_NAME = "aem-content-prod"
 HLX_PROD_SERVER_HOST_PAGE = "ssa-aem.page"
 HLX_PROD_SERVER_HOST_LIVE = "ssa-aem.live"
+CF_ACCOUNT_ID = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
+# S3_ACCESS_KEY_ID = "set via wrangler secret put"
+# S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
+# IMS_ORIGIN = "set via wrangler secret put"
