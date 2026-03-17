@@ -36,7 +36,7 @@ describe('Object storage', () => {
       const obj = { data };
       const resp = await putObject(env, daCtx, obj);
       assert.strictEqual(resp.status, 201);
-      assert.strictEqual(JSON.parse(resp.body).source.editUrl, 'https://da.live/edit#/adobe/foo')
+      assert.strictEqual(JSON.parse(resp.body).source.editUrl, `https://${env.DA_DOMAIN}/edit#/adobe/foo`)
     });
 
     it('Successfully puts no data', async () => {

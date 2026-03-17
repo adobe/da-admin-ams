@@ -20,6 +20,10 @@ port = 8787
 account_id = "980b8b7745c7f2165f369b9d6f3c61f5" # GovCloud Stage account
 keep_vars = true
 
+routes = [
+  { pattern = "stg-admin.ssa-da.live/*", zone_name = "ssa-da.live" }
+]
+
 # Service bindings (commented out until da-collab is deployed)
 # services = [
 #   { binding = "dacollab", service = "da-collab-ams-gov-stage" }
