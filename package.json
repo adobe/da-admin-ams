@@ -15,6 +15,7 @@
     "dev": "wrangler dev",
     "deploy:prod": "wrangler deploy --env gov-prod",
     "deploy:stage": "wrangler deploy --env gov-stage",
+    "deploy:ent-aem": "wrangler deploy --env ent-aem",
     "start": "wrangler dev"
   },
   "author": "",
@@ -34,7 +35,7 @@
     "*.cjs": "eslint"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.981.0",
+    "@aws-sdk/client-s3": "3.726.1",
     "@aws-sdk/s3-request-presigner": "^3.468.0",
     "@ssttevee/cfw-formdata-polyfill": "^0.2.1",
     "glob": "^13.0.1",
