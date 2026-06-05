@@ -13,6 +13,7 @@ import assert from 'node:assert';
 import esmock from 'esmock';
 import { mockClient } from 'aws-sdk-client-mock';
 import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { DA_DOMAIN } from '../../setup-env.js';
 
 const s3Mock = mockClient(S3Client);
 
@@ -30,7 +31,7 @@ describe('Object delete', () => {
       const client = {};
       const env = { dacollab };
       const daCtx = {
-        origin: 'https://admin.da.live',
+        origin: `https://admin.${DA_DOMAIN}`,
         org: 'testorg',
       };
 

@@ -31,6 +31,7 @@ import assert from 'assert';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import env from './mocks/env.js';
 import { getUsers } from '../../src/utils/auth.js';
+import { DA_DOMAIN, IMS_ORIGIN } from '../setup-env.js';
 
 async function generateMockKeyPair(kid) {
   const { publicKey, privateKey } = await generateKeyPair('RS256');
@@ -61,7 +62,7 @@ async function generateToken(kid, privateKey) {
 
 function mockRequest(accessToken) {
   return new Request(
-    'https://da.live/api/source/cq/',
+    `https://${DA_DOMAIN}/api/source/cq/`,
     {
       headers: new Headers({
         Authorization: `Bearer ${accessToken}`,
@@ -73,7 +74,7 @@ function mockRequest(accessToken) {
 describe('Offline Token Validation', async () => {
   beforeEach(() => {
     mockedResponses.clear();
-    mockFetch(`${env.IMS_ORIGIN}/ims/profile/v1`, {
+    mockFetch(`${IMS_ORIGIN}/ims/profile/v1`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -83,7 +84,7 @@ describe('Offline Token Validation', async () => {
       },
     });
 
-    mockFetch(`${env.IMS_ORIGIN}/ims/organizations/v5`, {
+    mockFetch(`${IMS_ORIGIN}/ims/organizations/v5`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -96,7 +97,7 @@ describe('Offline Token Validation', async () => {
     const kid = 'id1';
     const { privateKey, publicKeyJwk } = await generateMockKeyPair(kid);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -114,12 +115,12 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
           }
         },
         put: async (key, value) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cached = JSON.parse(value);
           }
         },
@@ -139,7 +140,7 @@ describe('Offline Token Validation', async () => {
     const kid = 'id1';
     const { privateKey, publicKeyJwk } = await generateMockKeyPair(kid);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -155,7 +156,7 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
             return JSON.stringify({
               uat: Date.now() - 1000,
@@ -166,7 +167,7 @@ describe('Offline Token Validation', async () => {
           }
         },
         put: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cached = true;
           }
         },
@@ -192,7 +193,7 @@ describe('Offline Token Validation', async () => {
       publicKeyJwk: publicKeyJwk2,
     } = await generateMockKeyPair(kid2);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -208,7 +209,7 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
             return JSON.stringify({
               uat: Date.now() - 120 * 1000,
@@ -219,7 +220,7 @@ describe('Offline Token Validation', async () => {
           }
         },
         put: async (key, value) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cached = JSON.parse(value);
           }
         },
@@ -253,7 +254,7 @@ describe('Offline Token Validation', async () => {
       publicKeyJwk: publicKeyJwk2,
     } = await generateMockKeyPair(kid2);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -269,7 +270,7 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
             return JSON.stringify({
               uat: Date.now() - 20 * 1000,
@@ -280,7 +281,7 @@ describe('Offline Token Validation', async () => {
           }
         },
         put: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cached = true;
           }
         },
@@ -298,7 +299,7 @@ describe('Offline Token Validation', async () => {
     const kid = 'id1';
     const { privateKey, publicKeyJwk } = await generateMockKeyPair(kid);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -316,7 +317,7 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
             return JSON.stringify({
               uat: Date.now() - 25 * 60 * 60 * 1000, // more than 24h ago
@@ -327,7 +328,7 @@ describe('Offline Token Validation', async () => {
           }
         },
         put: async (key, value) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cached = JSON.parse(value);
           }
         },
@@ -347,7 +348,7 @@ describe('Offline Token Validation', async () => {
     const kid = 'id1';
     const { privateKey, publicKeyJwk } = await generateMockKeyPair(kid);
 
-    mockFetch(`https://ims-na1.adobelogin.com/ims/keys`, {
+    mockFetch(`${IMS_ORIGIN}/ims/keys`, {
       ok: true,
       status: 200,
       json: async () => {
@@ -365,12 +366,12 @@ describe('Offline Token Validation', async () => {
       ...env,
       DA_AUTH: {
         get: async (key) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheLookup = true;
           }
         },
         put: async (key, value) => {
-          if (key === 'https://ims-na1.adobelogin.com/ims/keys') {
+          if (key === `${IMS_ORIGIN}/ims/keys`) {
             cacheAttempt = JSON.parse(value);
             throw new Error('429: Too many requests');
           }

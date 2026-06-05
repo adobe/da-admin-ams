@@ -2,9 +2,11 @@ import assert from 'assert';
 import putHelper from '../../src/helpers/source.js';
 
 import env from '../utils/mocks/env.js';
+import { DA_DOMAIN } from '../setup-env.js';
+
 const daCtx = { org: 'cq', key: 'geometrixx/hello.html', propsKey: 'geometrixx/hello.html.props' };
 
-const MOCK_URL = 'https://da.live/source/cq/geometrixx/hello';
+const MOCK_URL = `https://${DA_DOMAIN}/source/cq/geometrixx/hello`;
 
 describe('Source helper', () => {
   describe('Put success', async () => {

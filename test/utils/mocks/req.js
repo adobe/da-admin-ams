@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { DA_DOMAIN } from '../../setup-env.js';
+
 const optsWithEmptyHead = {
   headers: new Headers(),
 };
@@ -45,13 +47,13 @@ const optsWithForceFail = {
 };
 
 const reqs = {
-  api: new Request('https://da.live/api/source/cq/', optsWithEmptyHead),
-  org: new Request('https://da.live/source/cq/', optsWithEmptyHead),
-  site: new Request('https://da.live/source/cq/Geometrixx', optsWithAuth),
-  folder: new Request('https://da.live/source/cq/Geometrixx/NFT/', optsWithExpAuth),
-  file: new Request('https://da.live/source/cq/Geometrixx/NFT/Outreach.html', optsWithEmptyBearer),
-  media: new Request('https://da.live/source/cq/Geometrixx/NFT/blockchain.png', optsWithForceFail),
-  siteMulti: new Request('https://da.live/source/cq/Geometrixx', optsWithMultiAuthAnon),
+  api: new Request(`https://${DA_DOMAIN}/api/source/cq/`, optsWithEmptyHead),
+  org: new Request(`https://${DA_DOMAIN}/source/cq/`, optsWithEmptyHead),
+  site: new Request(`https://${DA_DOMAIN}/source/cq/Geometrixx`, optsWithAuth),
+  folder: new Request(`https://${DA_DOMAIN}/source/cq/Geometrixx/NFT/`, optsWithExpAuth),
+  file: new Request(`https://${DA_DOMAIN}/source/cq/Geometrixx/NFT/Outreach.html`, optsWithEmptyBearer),
+  media: new Request(`https://${DA_DOMAIN}/source/cq/Geometrixx/NFT/blockchain.png`, optsWithForceFail),
+  siteMulti: new Request(`https://${DA_DOMAIN}/source/cq/Geometrixx`, optsWithMultiAuthAnon),
 };
 
 export default reqs;
