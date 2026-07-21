@@ -82,3 +82,40 @@ CF_ACCOUNT_ID = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
 # S3_ACCESS_KEY_ID = "set via wrangler secret put"
 # S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
 # IMS_ORIGIN = "set via wrangler secret put"
+
+# === EDS EU ENVIRONMENT ===
+########################################################
+[env.eds-eu]
+account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+keep_vars = true
+
+routes = [
+  { pattern = "admin.eumseds-da.live/*", zone_name = "eumseds-da.live" }
+]
+
+# Service bindings (commented out until da-collab is deployed)
+services = [
+  { binding = "dacollab", service = "da-collab-ams-eds-eu" }
+]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "701f2f0ca25142ae8351aaf63804b67b" },
+  { binding = "DA_CONFIG", id = "1e8ea4dcd3ec4d93b04f5085b267d74a" },
+  { binding = "DA_JOBS", id = "012cea7f5b9b44329b52cb506cd5471f" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-eds-eu" }
+]
+
+[env.eds-eu.vars]
+ENVIRONMENT = "eds-eu"
+DA_DOMAIN = "eumseds-da.live"
+DA_COLLAB = "collab.eumseds-da.live"
+AEM_BUCKET_NAME = "aem-content-eds-eu"
+HLX_PROD_SERVER_HOST_PAGE = "eumseds.page"
+HLX_PROD_SERVER_HOST_LIVE = "eumseds.live"
+CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+# S3_ACCESS_KEY_ID = "set via wrangler secret put"
+# S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
+# IMS_ORIGIN = "set via wrangler secret put"
