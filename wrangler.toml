@@ -119,3 +119,40 @@ CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
 # S3_ACCESS_KEY_ID = "set via wrangler secret put"
 # S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
 # IMS_ORIGIN = "set via wrangler secret put"
+
+# === EDS CA ENVIRONMENT ===
+########################################################
+[env.eds-ca]
+account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+keep_vars = true
+
+routes = [
+  { pattern = "admin.entmseds-da.live/*", zone_name = "entmseds-da.live" }
+]
+
+# Service bindings (commented out until da-collab is deployed)
+services = [
+  { binding = "dacollab", service = "da-collab-ams-eds-ca" }
+]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "495c9bacc0c1463bb8f074005372ac4d" },
+  { binding = "DA_CONFIG", id = "a1d468d6ae674873807fa1c7511f4137" },
+  { binding = "DA_JOBS", id = "462cb92cda2c4556b0ebd743032f357b" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-eds-ca" }
+]
+
+[env.eds-ca.vars]
+ENVIRONMENT = "eds-ca"
+DA_DOMAIN = "entmseds-da.live"
+DA_COLLAB = "collab.entmseds-da.live"
+AEM_BUCKET_NAME = "aem-content-eds-ca"
+HLX_PROD_SERVER_HOST_PAGE = "entmseds.page"
+HLX_PROD_SERVER_HOST_LIVE = "entmseds.live"
+CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+# S3_ACCESS_KEY_ID = "set via wrangler secret put"
+# S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
+# IMS_ORIGIN = "set via wrangler secret put"

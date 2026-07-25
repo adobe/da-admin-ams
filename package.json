@@ -17,6 +17,7 @@
     "deploy:stage": "wrangler deploy --env gov-stage",
     "deploy:ent-aem": "wrangler deploy --env ent-aem",
     "deploy:eds-eu": "wrangler deploy --env eds-eu",
+    "deploy:eds-ca": "wrangler deploy --env eds-ca",
     "start": "wrangler dev"
   },
   "author": "",
