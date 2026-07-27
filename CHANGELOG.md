@@ -1,3 +1,147 @@
+# [1.5.0](https://github.com/adobe/da-admin/compare/v1.4.0...v1.5.0) (2026-04-27)
+
+
+### Features
+
+* all orgs write to audit.txt ([#262](https://github.com/adobe/da-admin/issues/262)) ([8dc7659](https://github.com/adobe/da-admin/commit/8dc765968a0a10199ba5452ff0ecfffb38dea896))
+
+# [1.4.0](https://github.com/adobe/da-admin/compare/v1.3.1...v1.4.0) (2026-04-23)
+
+
+### Features
+
+* add a retry to compensate R2 transient failure ([#257](https://github.com/adobe/da-admin/issues/257)) ([eb25f6d](https://github.com/adobe/da-admin/commit/eb25f6d258157af0fcfd6bc9219a1f907c211f51))
+
+## [1.3.1](https://github.com/adobe/da-admin/compare/v1.3.0...v1.3.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* normalize charset=utf-8 for text content types and support raw-body HTML PUTs ([#256](https://github.com/adobe/da-admin/issues/256)) ([29b4f4b](https://github.com/adobe/da-admin/commit/29b4f4b4cb35421be1389c3e2f42f1ced82895b2))
+
+# [1.3.0](https://github.com/adobe/da-admin/compare/v1.2.0...v1.3.0) (2026-04-02)
+
+
+### Features
+
+* restructure versions ([#253](https://github.com/adobe/da-admin/issues/253)) ([f583359](https://github.com/adobe/da-admin/commit/f58335943319553726ac9e01a76dd2828ed7ed7a))
+
+# [1.2.0](https://github.com/adobe/da-admin/compare/v1.1.7...v1.2.0) (2026-03-31)
+
+
+### Features
+
+* improve error handling ([#255](https://github.com/adobe/da-admin/issues/255)) ([3fc681c](https://github.com/adobe/da-admin/commit/3fc681c13561d30b5b182c8d1f6ff491b82eea7f))
+
+## [1.1.7](https://github.com/adobe/da-admin/compare/v1.1.6...v1.1.7) (2026-03-12)
+
+
+### Bug Fixes
+
+* **versionsource:** surface version creation failures and fix streaming warning ([#250](https://github.com/adobe/da-admin/issues/250)) ([4ee0dbe](https://github.com/adobe/da-admin/commit/4ee0dbec72a350cb92c2403db58137e7189402c5))
+
+## [1.1.6](https://github.com/adobe/da-admin/compare/v1.1.5...v1.1.6) (2026-02-25)
+
+
+### Bug Fixes
+
+* **auth:** make user identifier comparison case-insensitive ([#246](https://github.com/adobe/da-admin/issues/246)) ([aac2136](https://github.com/adobe/da-admin/commit/aac21366c856cf5cf3c59502768609bfaea6601b))
+
+## [1.1.5](https://github.com/adobe/da-admin/compare/v1.1.4...v1.1.5) (2026-02-18)
+
+
+### Bug Fixes
+
+* allow logout again ([#245](https://github.com/adobe/da-admin/issues/245)) ([3653979](https://github.com/adobe/da-admin/commit/3653979fa3034e7abf4801dad736956eb553a91b)), closes [#232](https://github.com/adobe/da-admin/issues/232)
+
+## [1.1.4](https://github.com/adobe/da-admin/compare/v1.1.3...v1.1.4) (2026-02-18)
+
+
+### Bug Fixes
+
+* api docs by clarifying file extension requirements in API paths ([#242](https://github.com/adobe/da-admin/issues/242)) ([7164ffe](https://github.com/adobe/da-admin/commit/7164ffe7f4500c2090da5388f5bcbeb21d81a3a9)), closes [#129](https://github.com/adobe/da-admin/issues/129)
+
+## [1.1.4](https://github.com/adobe/da-admin/compare/v1.1.3...v1.1.4) (2026-02-10)
+
+
+### Bug Fixes
+
+* api docs by clarifying file extension requirements in API paths ([#242](https://github.com/adobe/da-admin/issues/242)) ([7164ffe](https://github.com/adobe/da-admin/commit/7164ffe7f4500c2090da5388f5bcbeb21d81a3a9)), closes [#129](https://github.com/adobe/da-admin/issues/129)
+
+## [1.1.3](https://github.com/adobe/da-admin/compare/v1.1.2...v1.1.3) (2026-01-28)
+
+
+### Bug Fixes
+
+* do not lose permissions if read and write on config ([#240](https://github.com/adobe/da-admin/issues/240)) ([ac0971e](https://github.com/adobe/da-admin/commit/ac0971e4aa8ba9d0bca221703394015dcddc2d62))
+
+## [1.1.2](https://github.com/adobe/da-admin/compare/v1.1.1...v1.1.2) (2026-01-15)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#218](https://github.com/adobe/da-admin/issues/218)) ([1bfca22](https://github.com/adobe/da-admin/commit/1bfca22987232fe6dc2247eeb9656a1e94c63ec8))
+
+## [1.1.1](https://github.com/adobe/da-admin/compare/v1.1.0...v1.1.1) (2026-01-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-process-queue to v3.1.5 ([#230](https://github.com/adobe/da-admin/issues/230)) ([f4b7861](https://github.com/adobe/da-admin/commit/f4b7861520aad0dab153381ee8ff4bca4c6930c5))
+
+# [1.1.0](https://github.com/adobe/da-admin/compare/v1.0.5...v1.1.0) (2026-01-13)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+* repair release ([#234](https://github.com/adobe/da-admin/issues/234)) ([104409e](https://github.com/adobe/da-admin/commit/104409ec43651cc2359929a683509f279248e6b6))
+
+
+### Features
+
+* add special IMS org with full access ([#233](https://github.com/adobe/da-admin/issues/233)) ([8e35211](https://github.com/adobe/da-admin/commit/8e35211c475e5ac9112ef9915166fe0b41a58ac8))
+
+# [1.1.0](https://github.com/adobe/da-admin/compare/v1.0.5...v1.1.0) (2026-01-13)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+
+
+### Features
+
+* add special IMS org with full access ([#233](https://github.com/adobe/da-admin/issues/233)) ([8e35211](https://github.com/adobe/da-admin/commit/8e35211c475e5ac9112ef9915166fe0b41a58ac8))
+
+## [1.0.6](https://github.com/adobe/da-admin/compare/v1.0.5...v1.0.6) (2026-01-07)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+
+## [1.0.5](https://github.com/adobe/da-admin/compare/v1.0.4...v1.0.5) (2025-12-18)
+
+
+### Bug Fixes
+
+* fix prod worker name ([#227](https://github.com/adobe/da-admin/issues/227)) ([73b05c7](https://github.com/adobe/da-admin/commit/73b05c72aace78c99b8a3f54ea517172fa3120f0))
+
+## [1.0.4](https://github.com/adobe/da-admin/compare/v1.0.3...v1.0.4) (2025-12-18)
+
+
+### Bug Fixes
+
+* GH-221 - Disable anonymous access ([#225](https://github.com/adobe/da-admin/issues/225)) ([df98f3e](https://github.com/adobe/da-admin/commit/df98f3eca7b51ae05db7106a01b7f77f25f3c6c8)), closes [#221](https://github.com/adobe/da-admin/issues/221) [#221](https://github.com/adobe/da-admin/issues/221) [#221](https://github.com/adobe/da-admin/issues/221)
+
+## [1.0.3](https://github.com/adobe/da-admin/compare/v1.0.2...v1.0.3) (2025-12-17)
+
+
+### Bug Fixes
+
+* stalled response ([#226](https://github.com/adobe/da-admin/issues/226)) ([d32fa3e](https://github.com/adobe/da-admin/commit/d32fa3eb470c8fbdbca61e9b9ba7961956ab9bbf))
+
 ## [1.0.2](https://github.com/adobe/da-admin/compare/v1.0.1...v1.0.2) (2025-12-15)
 
 

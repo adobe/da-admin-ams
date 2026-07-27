@@ -24,11 +24,17 @@ describe('fetch', () => {
   });
 
   it('should return a response object for unknown', async () => {
-    const resp = await handler.fetch({ url: 'https://www.example.com/endpoint/repo/path/file.html', method: 'BLAH' }, {});
+    const hnd = await esmock('../src/index.js', {
+      '../src/utils/daCtx.js': {
+        default: async () => ({ authorized: true, users: [{ email: 'test@example.com' }], path: '/endpoint/repo/path/file.html' }),
+      },
+    });
+
+    const resp = await hnd.fetch({ url: 'https://www.example.com/endpoint/repo/path/file.html', method: 'BLAH' }, {});
     assert.strictEqual(resp.status, 405);
   });
 
-  it('should return 401 when not authorized and not logged in', async () => {
+  it('should return 401 when user is anonymous', async () => {
     const hnd = await esmock('../src/index.js', {
       '../src/utils/daCtx.js': {
         default: async () => ({ authorized: false, users: [{ email: 'anonymous' }] }),
@@ -37,6 +43,17 @@ describe('fetch', () => {
 
     const resp = await hnd.fetch({ method: 'GET' }, {});
     assert.strictEqual(resp.status, 401);
+  });
+
+  it('should return 401 when not authorized and not logged in', async () => {
+    const hnd = await esmock('../src/index.js', {
+      '../src/utils/daCtx.js': {
+        default: async () => ({ authorized: false, users: [{ email: 'test@example.com' }] }),
+      },
+    });
+
+    const resp = await hnd.fetch({ method: 'GET' }, {});
+    assert.strictEqual(resp.status, 403);
   });
 
   it('should return 403 when logged in but not authorized', async () => {
@@ -51,7 +68,13 @@ describe('fetch', () => {
   });
 
   it('return 404 for unknown get route', async () => {
-    const resp = await handler.fetch({ method: 'GET', url: 'http://www.example.com/' }, {});
+    const hnd = await esmock('../src/index.js', {
+      '../src/utils/daCtx.js': {
+        default: async () => ({ authorized: true, users: [{ email: 'test@example.com' }], path: '/' }),
+      },
+    });
+
+    const resp = await hnd.fetch({ method: 'GET', url: 'http://www.example.com/' }, {});
     assert.strictEqual(resp.status, 404);
   });
 
@@ -67,11 +90,60 @@ describe('fetch', () => {
     const resp = await hnd.fetch({ method: 'GET', url: 'http://www.example.com/source/org/repo/file.html' }, {});
     assert.strictEqual(resp.status, 500);
   });
+
+  it('should expose continuation token header for list responses', async () => {
+    const hnd = await esmock('../src/index.js', {
+      '../src/utils/daCtx.js': {
+        default: async () => ({
+          authorized: true,
+          users: [{ email: 'test@example.com' }],
+          path: '/list/org/repo/path',
+          key: 'repo/path',
+        }),
+      },
+      '../src/handlers/get.js': {
+        default: async () => ({
+          status: 200,
+          body: '[]',
+          contentType: 'application/json',
+          continuationToken: 'next-token',
+        }),
+      },
+    });
+
+    const resp = await hnd.fetch({ method: 'GET', url: 'http://www.example.com/list/org/repo/path' }, {});
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(resp.headers.get('da-continuation-token'), 'next-token');
+  });
 });
 
 describe('invalid routes', () => {
+  let hnd;
+
+  before(async () => {
+    hnd = await esmock('../src/index.js', {
+      '../src/utils/daCtx.js': {
+        default: async (req) => {
+          const { pathname } = new URL(req.url);
+          // For invalid paths, throw the error that getDaCtx would throw
+          if (pathname.includes('//')) {
+            throw new Error('Invalid path');
+          }
+          return {
+            authorized: true,
+            users: [{ email: 'test@example.com' }],
+            path: pathname,
+            api: 'source',
+            org: 'owner',
+            key: 'repo/path/file.html',
+          };
+        },
+      },
+    });
+  });
+
   const fetchStatus = async (path, method) => {
-    const resp = await handler.fetch({ method, url: `http://www.sample.com${path}` }, {});
+    const resp = await hnd.fetch({ method, url: `http://www.sample.com${path}` }, {});
     return resp.status;
   };
 

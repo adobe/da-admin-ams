@@ -1,6 +1,6 @@
 {
   "name": "da-admin",
-  "version": "1.0.2",
+  "version": "1.5.0",
   "description": "",
   "main": "index.js",
   "type": "module",
@@ -15,11 +15,13 @@
     "test": "c8 mocha --spec=test/**/*.test.js --ignore=test/it/**/*.test.js",
     "test:it": "mocha test/it/**/*.test.js",
     "test:all": "npm run test && npm run test:it",
-    "test:postdeploy": "echo 'todo'",
+    "test:postdeploy": "if [ -f .deployment-env ]; then . ./.deployment-env; fi && npm run test:it",
     "dev": "wrangler dev -e dev",
-    "deploy:ci": "node prepare-deploy.js && wrangler deploy -e ci  -c wrangler-versioned.toml",
-    "deploy:prod": "node prepare-deploy.js && wrangler deploy --env gov-prod -e production -c wrangler-versioned.toml",
-    "deploy:stage": "node prepare-deploy.js && wrangler deploy -e gov-stage -c wrangler-versioned.toml",
+    "deploy:ci": "./deploy-ci-version.sh ci",
+    "deploy:prod": "node prepare-deploy.js && wrangler deploy -e production -c wrangler-versioned.toml",
+    "deploy:stage": "node prepare-deploy.js && wrangler deploy -e stage -c wrangler-versioned.toml",
+    "deploy:gov-prod": "node prepare-deploy.js && wrangler deploy --env gov-prod -e production -c wrangler-versioned.toml",
+    "deploy:gov-stage": "node prepare-deploy.js && wrangler deploy -e gov-stage -c wrangler-versioned.toml",
     "deploy:ent-aem": "node prepare-deploy.js && wrangler deploy -e ent-aem -c wrangler-versioned.toml",
     "deploy:eds-eu": "node prepare-deploy.js && wrangler deploy -e eds-eu -c wrangler-versioned.toml",
     "deploy:eds-ca": "node prepare-deploy.js && wrangler deploy -e eds-ca -c wrangler-versioned.toml",
@@ -30,35 +32,36 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@adobe/eslint-config-helix": "3.0.15",
-    "@redocly/cli": "2.0.0",
+    "@adobe/eslint-config-helix": "3.0.16",
+    "@redocly/cli": "2.14.2",
     "@semantic-release/changelog": "6.0.3",
     "@semantic-release/exec": "7.1.0",
     "@semantic-release/git": "10.0.1",
-    "aws-sdk-client-mock": "4.0.0",
-    "c8": "10.0.0",
+    "aws-sdk-client-mock": "4.1.0",
+    "c8": "10.1.3",
+    "dotenv": "17.2.3",
     "eslint": "9.4.0",
     "esmock": "2.7.3",
     "husky": "9.1.7",
     "lint-staged": "16.2.7",
-    "mocha": "11.0.0",
+    "mocha": "11.7.5",
     "s3rver": "3.7.1",
     "semantic-release": "25.0.2",
     "semantic-release-slack-bot": "4.0.2",
-    "sinon": "21.0.0",
+    "sinon": "21.0.1",
     "tree-kill": "1.2.2",
-    "wrangler": "4.10.0"
+    "wrangler": "4.54.0"
   },
   "lint-staged": {
     "*.js": "eslint",
     "*.cjs": "eslint"
   },
   "dependencies": {
-    "@adobe/helix-shared-process-queue": "3.1.3",
+    "@adobe/helix-shared-process-queue": "3.1.5",
     "@aws-sdk/client-s3": "3.726.1",
     "@aws-sdk/s3-request-presigner": "^3.468.0",
-    "@cloudflare/workers-types": "4.20251126.0",
+    "@cloudflare/workers-types": "4.20260101.0",
     "@ssttevee/cfw-formdata-polyfill": "0.2.1",
-    "jose": "6.0.10"
+    "jose": "6.1.3"
   }
 }
