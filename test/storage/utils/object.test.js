@@ -32,17 +32,17 @@ describe('Storage Object Utils tests', () => {
     const { called, env } = setupEnv();
 
     assert.strictEqual(called.length, 0, 'precondition');
-    await notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.html', env);
+    await notifyCollab('syncadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c.html`, env);
     assert.strictEqual(called.length, 1);
-    assert.strictEqual(called[0], 'https://localhost/api/v1/syncadmin?doc=https://admin.da.live/source/a/b/c.html');
+    assert.strictEqual(called[0], `https://localhost/api/v1/syncadmin?doc=https://admin.${env.DA_DOMAIN}/source/a/b/c.html`);
   });
 
   it('Should not invalidate non-html documents', async () => {
     const { called, env } = setupEnv();
 
     assert.strictEqual(called.length, 0, 'precondition');
-    await notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.jpg', env);
-    await notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c/d', env);
+    await notifyCollab('syncadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c.jpg`, env);
+    await notifyCollab('syncadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c/d`, env);
     assert.strictEqual(called.length, 0, 'should not have invalidated anything');
   });
 
@@ -58,7 +58,7 @@ describe('Storage Object Utils tests', () => {
       },
     };
     await assert.doesNotReject(
-      notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.html', env),
+      notifyCollab('syncadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c.html`, env),
     );
   });
 
@@ -76,9 +76,9 @@ describe('Storage Object Utils tests', () => {
       COLLAB_SHARED_SECRET: 'example-secret',
     };
     assert.strictEqual(called.length, 0, 'precondition');
-    await notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.html', env);
+    await notifyCollab('syncadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c.html`, env);
     assert.strictEqual(called.length, 1);
-    assert.strictEqual(called[0], 'https://localhost/api/v1/syncadmin?doc=https://admin.da.live/source/a/b/c.html');
+    assert.strictEqual(called[0], `https://localhost/api/v1/syncadmin?doc=https://admin.${env.DA_DOMAIN}/source/a/b/c.html`);
   });
 
   it('Should not throw when collab returns a null-body response (e.g. 204)', async () => {
@@ -99,10 +99,10 @@ describe('Storage Object Utils tests', () => {
     };
 
     await assert.doesNotReject(
-      () => notifyCollab('deleteadmin', 'https://admin.da.live/source/a/b/c.html', env),
+      () => notifyCollab('deleteadmin', `https://admin.${env.DA_DOMAIN}/source/a/b/c.html`, env),
       'notifyCollab must tolerate a null response body',
     );
     assert.strictEqual(called.length, 1);
-    assert.strictEqual(called[0], 'https://localhost/api/v1/deleteadmin?doc=https://admin.da.live/source/a/b/c.html');
+    assert.strictEqual(called[0], `https://localhost/api/v1/deleteadmin?doc=https://admin.${env.DA_DOMAIN}/source/a/b/c.html`);
   });
 });

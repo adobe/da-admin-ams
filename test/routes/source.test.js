@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import esmock from 'esmock';
 
 import { getAclCtx } from '../../src/utils/auth.js';
+import mockEnv from '../utils/mocks/env.js';
 
 describe('Source Route', () => {
   it('Test invalidate using service binding', async () => {
@@ -366,7 +367,7 @@ describe('Source Route', () => {
     body.append('guid', 'image-guid-123');
 
     const opts = { body, method: 'POST' };
-    const req = new Request('https://da.live/source/org/repo/images/photo.jpg', opts);
+    const req = new Request(`https://${mockEnv.DA_DOMAIN}/source/org/repo/images/photo.jpg`, opts);
 
     const resp = await postSource({ req, env: {}, daCtx: ctx });
     assert.strictEqual(1, putCalled.length);
@@ -402,7 +403,7 @@ describe('Source Route', () => {
     body.append('data', pngFile);
 
     const opts = { body, method: 'POST' };
-    const req = new Request('https://da.live/source/org/repo/images/graphic.png', opts);
+    const req = new Request(`https://${mockEnv.DA_DOMAIN}/source/org/repo/images/graphic.png`, opts);
 
     const resp = await postSource({ req, env: {}, daCtx: ctx });
     assert.strictEqual(1, putCalled.length);
@@ -437,7 +438,7 @@ describe('Source Route', () => {
     body.append('data', pdfFile);
 
     const opts = { body, method: 'POST' };
-    const req = new Request('https://da.live/source/org/repo/docs/report.pdf', opts);
+    const req = new Request(`https://${mockEnv.DA_DOMAIN}/source/org/repo/docs/report.pdf`, opts);
 
     const resp = await postSource({ req, env: {}, daCtx: ctx });
     assert.strictEqual(1, putCalled.length);

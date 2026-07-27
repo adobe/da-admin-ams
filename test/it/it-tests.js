@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import assert from 'node:assert';
+import env from '../utils/mocks/env.js';
 
 // eslint-disable-next-line func-names
 export default (ctx) => describe('Integration Tests: it tests', function () {
@@ -262,10 +263,10 @@ export default (ctx) => describe('Integration Tests: it tests', function () {
     assert.ok([200, 201].includes(resp.status), `Expected 200 or 201, got ${resp.status} - user: ${superUser.email}`);
 
     let body = await resp.json();
-    assert.strictEqual(body.source.editUrl, `https://da.live/edit#/${org}/${repo}/${key}`);
-    assert.strictEqual(body.source.contentUrl, `https://content.da.live/${org}/${repo}/${key}`);
-    assert.strictEqual(body.aem.previewUrl, `https://main--${repo}--${org}.aem.page/${key}`);
-    assert.strictEqual(body.aem.liveUrl, `https://main--${repo}--${org}.aem.live/${key}`);
+    assert.strictEqual(body.source.editUrl, `https://${env.DA_DOMAIN}/edit#/${org}/${repo}/${key}`);
+    assert.strictEqual(body.source.contentUrl, `https://content.${env.DA_DOMAIN}/${org}/${repo}/${key}`);
+    assert.strictEqual(body.aem.previewUrl, `https://main--${repo}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}/${key}`);
+    assert.strictEqual(body.aem.liveUrl, `https://main--${repo}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}/${key}`);
 
     // validate page is here (include extension in GET request)
     resp = await fetch(`${serverUrl}/source/${org}/${repo}/${key}${ext}`, {

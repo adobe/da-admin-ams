@@ -38,9 +38,9 @@ const env = {
   S3_ACCESS_KEY_ID: 'an-id',
   S3_SECRET_ACCESS_KEY: 'too-many-secrets',
   IMS_ORIGIN: 'https://ims-na1.adobelogin.com',
-  DA_DOMAIN: 'ssa-da.live',
-  HLX_PROD_SERVER_HOST_PAGE: 'gov-aem.page',
-  HLX_PROD_SERVER_HOST_LIVE: 'gov-aem.live',
+  DA_DOMAIN: process.env.DA_DOMAIN || 'BAD_VAR_da-admin-ams_DA_DOMAIN',
+  HLX_PROD_SERVER_HOST_PAGE: process.env.HLX_PROD_SERVER_HOST_PAGE || 'BAD_VAR_da-admin-ams_HLX_PROD_SERVER_HOST_PAGE',
+  HLX_PROD_SERVER_HOST_LIVE: process.env.HLX_PROD_SERVER_HOST_LIVE || 'BAD_VAR_da-admin-ams_HLX_PROD_SERVER_HOST_LIVE',
   DA_AUTH: {
     get: (kvNamespace) => NAMESPACES[kvNamespace],
     put: (kvNamespace, value, expObj) => {},

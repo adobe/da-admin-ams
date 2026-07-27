@@ -35,7 +35,7 @@ describe('Object delete', () => {
       const client = {};
       const env = { dacollab };
       const daCtx = {
-        origin: 'https://admin.da.live',
+        origin: `https://admin.${env.DA_DOMAIN}`,
         org: 'testorg',
       };
 
@@ -76,7 +76,7 @@ describe('Object delete', () => {
         assert.equal(204, resp.status);
         // assert.deepStrictEqual(['postObjectVersionWithLabel'], postObjVerCalled);
         // assert.deepStrictEqual(
-        //   ['https://localhost/api/v1/deleteadmin?doc=https://admin.da.live/source/testorg/foo/bar.html'],
+        //   [`https://localhost/api/v1/deleteadmin?doc=https://admin.${env.DA_DOMAIN}/source/testorg/foo/bar.html`],
         //   collabCalled
         // );
       } finally {

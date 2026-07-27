@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import env from './env.js';
+
 const optsWithEmptyHead = {
   headers: new Headers(),
 };
@@ -45,16 +47,16 @@ const optsWithForceFail = {
 };
 
 const reqs = {
-  api: new Request('https://da.live/api/source/cq/', optsWithEmptyHead),
-  org: new Request('https://da.live/source/cq/', optsWithEmptyHead),
-  orgNoTrail: new Request('https://da.live/list/cq', optsWithEmptyHead),
-  site: new Request('https://da.live/source/cq/Geometrixx', optsWithAuth),
-  folder: new Request('https://da.live/source/cq/Geometrixx/NFT/', optsWithExpAuth),
-  file: new Request('https://da.live/source/cq/Geometrixx/NFT/Outreach.html', optsWithEmptyBearer),
-  media: new Request('https://da.live/source/cq/Geometrixx/NFT/blockchain.png', optsWithForceFail),
-  siteMulti: new Request('https://da.live/source/cq/Geometrixx', optsWithMultiAuthAnon),
-  endpoint: new Request('https://da.live/endpoint/', optsWithEmptyHead),
-  endpointNoTrail: new Request('https://da.live/endpoint', optsWithEmptyHead),
+  api: new Request(`https://${env.DA_DOMAIN}/api/source/cq/`, optsWithEmptyHead),
+  org: new Request(`https://${env.DA_DOMAIN}/source/cq/`, optsWithEmptyHead),
+  orgNoTrail: new Request(`https://${env.DA_DOMAIN}/list/cq`, optsWithEmptyHead),
+  site: new Request(`https://${env.DA_DOMAIN}/source/cq/Geometrixx`, optsWithAuth),
+  folder: new Request(`https://${env.DA_DOMAIN}/source/cq/Geometrixx/NFT/`, optsWithExpAuth),
+  file: new Request(`https://${env.DA_DOMAIN}/source/cq/Geometrixx/NFT/Outreach.html`, optsWithEmptyBearer),
+  media: new Request(`https://${env.DA_DOMAIN}/source/cq/Geometrixx/NFT/blockchain.png`, optsWithForceFail),
+  siteMulti: new Request(`https://${env.DA_DOMAIN}/source/cq/Geometrixx`, optsWithMultiAuthAnon),
+  endpoint: new Request(`https://${env.DA_DOMAIN}/endpoint/`, optsWithEmptyHead),
+  endpointNoTrail: new Request(`https://${env.DA_DOMAIN}/endpoint`, optsWithEmptyHead),
 };
 
 export default reqs;

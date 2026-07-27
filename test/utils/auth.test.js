@@ -85,7 +85,7 @@ describe('DA auth', () => {
         },
       });
 
-      const req = new Request('https://da.live/source/cq/test', {
+      const req = new Request(`https://${env.DA_DOMAIN}/source/cq/test`, {
         headers: new Headers({ Authorization: 'Bearer sometoken' }),
       });
 

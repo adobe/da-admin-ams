@@ -62,7 +62,7 @@ async function generateToken(kid, privateKey) {
 
 function mockRequest(accessToken) {
   return new Request(
-    'https://da.live/api/source/cq/',
+    `https://${env.DA_DOMAIN}/api/source/cq/`,
     {
       headers: new Headers({
         Authorization: `Bearer ${accessToken}`,
