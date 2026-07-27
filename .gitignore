@@ -143,4 +143,4 @@ dist
 # Integration test - S3rver generated files
 test/it/bucket/
 
-scripts/
+.claude

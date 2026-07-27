@@ -12,9 +12,17 @@
 /* eslint-disable no-unused-vars,camelcase */
 import assert from 'node:assert';
 import esmock from 'esmock';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
+import { getContentLength } from '../../../src/storage/version/put.js';
 
 describe('Version Put', () => {
+  describe('getContentLength', () => {
+    it('returns byteLength for ArrayBuffer body', () => {
+      const buf = new ArrayBuffer(17);
+      assert.strictEqual(getContentLength(buf), 17);
+    });
+  });
+
   it('Test putObjectWithVersion retry on new document', async () => {
     const getObjectCalls = [];
     const mockGetObject = async (e, u, nb) => {
@@ -220,6 +228,153 @@ describe('Version Put', () => {
     const mockCtx = { users: [{ email: 'blah@acme.com' }] };
     const resp = await putObjectWithVersion(mockEnv, mockCtx, mockUpdate, true);
     assert.equal(500, resp.status);
+    assert.strictEqual(resp.error, 'testing 123');
+  });
+
+  it('putObjectWithVersion retries on ETag mismatch when If-Match: * is sent (existing document, concurrent write)', async () => {
+    let getObjectCallCount = 0;
+    const mockGetObject = async () => {
+      getObjectCallCount += 1;
+      return { status: 200, metadata: { id: 'existing-id' }, etag: `etag-${getObjectCallCount}` };
+    };
+
+    let firstWrite = true;
+    const sendCalls = [];
+    const mockIfMatchClient = {
+      async send(cmd) {
+        sendCalls.push(cmd);
+        if (firstWrite) {
+          firstWrite = false;
+          const err = { $metadata: { httpStatusCode: 412 } };
+          throw err;
+        }
+        return { $metadata: { httpStatusCode: 200 } };
+      },
+    };
+
+    const { putObjectWithVersion } = await esmock('../../../src/storage/version/put.js', {
+      '../../../src/storage/object/get.js': { default: mockGetObject },
+      '../../../src/storage/utils/version.js': {
+        ifMatch: () => mockIfMatchClient,
+        ifNoneMatch: () => mockIfMatchClient,
+      },
+    });
+
+    const resp = await putObjectWithVersion(
+      { env: true },
+      { users: [{ email: 'a@b.com' }] },
+      { org: 'org', key: 'doc.html', type: 'text/html' },
+      null,
+      null,
+      { ifMatch: '*' },
+    );
+
+    assert.equal(200, resp.status, 'Should succeed after retry');
+    assert.equal(2, getObjectCallCount, 'Should have fetched current state twice (initial + retry)');
+    assert.equal(2, sendCalls.length, 'Should have attempted R2 write twice');
+  });
+
+  it('putObjectWithVersion returns 412 without retry when client sends specific ETag and R2 rejects it', async () => {
+    const mockGetObject = async () => ({
+      status: 200,
+      metadata: { id: 'existing-id' },
+      etag: '"server-etag"',
+    });
+
+    const sendCalls = [];
+    const mockIfMatchClient = {
+      async send(cmd) {
+        sendCalls.push(cmd);
+        const err = { $metadata: { httpStatusCode: 412 } };
+        throw err;
+      },
+    };
+
+    const { putObjectWithVersion } = await esmock('../../../src/storage/version/put.js', {
+      '../../../src/storage/object/get.js': { default: mockGetObject },
+      '../../../src/storage/utils/version.js': {
+        ifMatch: () => mockIfMatchClient,
+        ifNoneMatch: () => mockIfMatchClient,
+      },
+    });
+
+    const resp = await putObjectWithVersion(
+      { env: true },
+      { users: [{ email: 'a@b.com' }] },
+      { org: 'org', key: 'doc.html', type: 'text/html' },
+      null,
+      null,
+      { ifMatch: '"client-specific-etag"' },
+    );
+
+    assert.equal(412, resp.status, 'Should propagate 412 when client sent a specific ETag');
+    assert.equal(1, sendCalls.length, 'Should not retry when client sent a specific ETag');
+  });
+
+  it('putObjectWithVersion stops retrying new document after MAX_PUT_ATTEMPTS', async () => {
+    const getObjectCalls = [];
+    const mockGetObject = async (e, u, nb) => {
+      getObjectCalls.push(1);
+      return { status: 404, metadata: {} };
+    };
+
+    const sendCalls = [];
+    const mockS3Client = {
+      async send(cmd) {
+        sendCalls.push(cmd);
+        const err = new Error('PreconditionFailed');
+        err.$metadata = { httpStatusCode: 412 };
+        throw err;
+      },
+    };
+
+    const { putObjectWithVersion } = await esmock('../../../src/storage/version/put.js', {
+      '../../../src/storage/object/get.js': { default: mockGetObject },
+      '../../../src/storage/utils/version.js': { ifNoneMatch: () => mockS3Client },
+    });
+
+    const resp = await putObjectWithVersion({}, { users: [] }, {}, false);
+
+    assert.equal(412, resp.status);
+    assert.equal(6, sendCalls.length, 'Should attempt exactly MAX_PUT_ATTEMPTS+1 (5+1) times');
+    assert.equal(6, getObjectCalls.length, 'Should re-fetch object on each retry');
+  });
+
+  it('putObjectWithVersion stops retrying existing document after MAX_PUT_ATTEMPTS', async () => {
+    const getObjectCalls = [];
+    const mockGetObject = async () => {
+      getObjectCalls.push(1);
+      return { status: 200, metadata: {}, etag: 'etag-x' };
+    };
+
+    const sendCalls = [];
+    const mockIfMatchClient = {
+      async send(cmd) {
+        sendCalls.push(cmd);
+        const err = new Error('PreconditionFailed');
+        err.$metadata = { httpStatusCode: 412 };
+        throw err;
+      },
+    };
+    const mockIfNoneMatchClient = {
+      async send() {
+        return { $metadata: { httpStatusCode: 200 } };
+      },
+    };
+
+    const { putObjectWithVersion } = await esmock('../../../src/storage/version/put.js', {
+      '../../../src/storage/object/get.js': { default: mockGetObject },
+      '../../../src/storage/utils/version.js': {
+        ifMatch: () => mockIfMatchClient,
+        ifNoneMatch: () => mockIfNoneMatchClient,
+      },
+    });
+
+    const resp = await putObjectWithVersion({}, { users: [] }, {}, false);
+
+    assert.equal(412, resp.status);
+    assert.equal(6, sendCalls.length, 'Should attempt exactly MAX_PUT_ATTEMPTS+1 (5+1) times');
+    assert.equal(6, getObjectCalls.length, 'Should re-fetch object on each retry');
   });
 
   it('Put Object With Version store content', async () => {
@@ -469,7 +624,7 @@ describe('Version Put', () => {
     // eslint-disable-next-line consistent-return
     const mockGetObject = async (e, u, h) => {
       if (e === env && !h) {
-        const body = ReadableStream.from('doccontent');
+        const body = ReadableStream.from([new TextEncoder().encode('doccontent')]);
         return {
           body,
           contentType: 'text/html',
@@ -517,7 +672,6 @@ describe('Version Put', () => {
     const resp = await postObjectVersion(req, env, ctx);
     assert.equal(201, resp.status);
     assert.equal(1, s3INMSent.length);
-    assert(s3INMSent[0].input.Body instanceof ReadableStream);
     assert.equal('mybucket', s3INMSent[0].input.Bucket);
     assert.equal('q/r/t', s3INMSent[0].input.Metadata.Path);
     assert(s3INMSent[0].input.Metadata.Timestamp > 0);
@@ -526,7 +680,6 @@ describe('Version Put', () => {
     assert.equal(10, s3INMSent[0].input.ContentLength);
 
     assert.equal(1, s3Sent.length);
-    assert(s3Sent[0].input.Body instanceof ReadableStream);
     assert.equal('mybucket', s3Sent[0].input.Bucket);
     assert.equal('org123/q/r/t', s3Sent[0].input.Key);
     assert.equal('q/r/t', s3Sent[0].input.Metadata.Path);
@@ -781,9 +934,11 @@ describe('Version Put', () => {
     s3Client = s3client2;
     const resp2 = await putVersion({}, { Body: 'hello' });
     assert.equal(500, resp2.status);
+    assert.strictEqual(resp2.error, 'Test error2');
     s3Client = s3client3;
     const resp3 = await putVersion({}, { Body: 'hello' });
     assert.equal(500, resp3.status);
+    assert.strictEqual(resp3.error, 'Test error3');
   });
 
   it('Test putVersion preserves ContentType', async () => {
@@ -806,6 +961,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'test-bucket',
       Org: 'test-org',
+      Repo: 'myrepo',
       Body: 'test content',
       ID: 'test-id',
       Version: 'test-version',
@@ -820,7 +976,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'test-bucket');
-    assert.strictEqual(putCommand.input.Key, 'test-org/.da-versions/test-id/test-version.html');
+    assert.strictEqual(putCommand.input.Key, 'test-org/myrepo/.da-versions/test-id/test-version.html');
     assert.strictEqual(putCommand.input.Body, 'test content');
     assert.strictEqual(putCommand.input.ContentLength, 12);
     assert.strictEqual(putCommand.input.ContentType, 'text/html');
@@ -901,6 +1057,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'media-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: jpegFile,
       ID: 'jpeg-id-123',
       Version: 'jpeg-version-1',
@@ -915,7 +1072,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'media-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/jpeg-id-123/jpeg-version-1.jpg');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/jpeg-id-123/jpeg-version-1.jpg');
     assert.strictEqual(putCommand.input.Body, jpegFile);
     assert.strictEqual(putCommand.input.ContentType, 'image/jpeg');
     assert.strictEqual(putCommand.input.Metadata.Users, '["user@example.com"]');
@@ -946,6 +1103,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'media-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: pngFile,
       ID: 'png-id-456',
       Version: 'png-version-1',
@@ -960,7 +1118,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'media-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/png-id-456/png-version-1.png');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/png-id-456/png-version-1.png');
     assert.strictEqual(putCommand.input.Body, pngFile);
     assert.strictEqual(putCommand.input.ContentType, 'image/png');
   });
@@ -989,6 +1147,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'media-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: mp4File,
       ID: 'video-id-789',
       Version: 'video-version-1',
@@ -1003,7 +1162,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'media-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/video-id-789/video-version-1.mp4');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/video-id-789/video-version-1.mp4');
     assert.strictEqual(putCommand.input.Body, mp4File);
     assert.strictEqual(putCommand.input.ContentType, 'video/mp4');
   });
@@ -1032,6 +1191,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'media-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: svgFile,
       ID: 'svg-id-abc',
       Version: 'svg-version-1',
@@ -1046,7 +1206,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'media-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/svg-id-abc/svg-version-1.svg');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/svg-id-abc/svg-version-1.svg');
     assert.strictEqual(putCommand.input.Body, svgFile);
     assert.strictEqual(putCommand.input.ContentType, 'image/svg+xml');
   });
@@ -1150,6 +1310,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'docs-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: pdfFile,
       ID: 'pdf-id-123',
       Version: 'pdf-version-1',
@@ -1164,7 +1325,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'docs-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/pdf-id-123/pdf-version-1.pdf');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/pdf-id-123/pdf-version-1.pdf');
     assert.strictEqual(putCommand.input.Body, pdfFile);
     assert.strictEqual(putCommand.input.ContentType, 'application/pdf');
   });
@@ -1193,6 +1354,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'files-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: zipFile,
       ID: 'zip-id-456',
       Version: 'zip-version-1',
@@ -1207,7 +1369,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'files-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/zip-id-456/zip-version-1.zip');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/zip-id-456/zip-version-1.zip');
     assert.strictEqual(putCommand.input.Body, zipFile);
     assert.strictEqual(putCommand.input.ContentType, 'application/zip');
   });
@@ -1236,6 +1398,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'storage-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: binaryFile,
       ID: 'binary-id-789',
       Version: 'binary-version-1',
@@ -1250,7 +1413,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'storage-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/binary-id-789/binary-version-1.bin');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/binary-id-789/binary-version-1.bin');
     assert.strictEqual(putCommand.input.Body, binaryFile);
     assert.strictEqual(putCommand.input.ContentType, 'application/octet-stream');
   });
@@ -1279,6 +1442,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'media-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: mp3File,
       ID: 'audio-id-abc',
       Version: 'audio-version-1',
@@ -1293,7 +1457,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'media-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/audio-id-abc/audio-version-1.mp3');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/audio-id-abc/audio-version-1.mp3');
     assert.strictEqual(putCommand.input.Body, mp3File);
     assert.strictEqual(putCommand.input.ContentType, 'audio/mpeg');
   });
@@ -1326,6 +1490,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'content-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: htmlFile,
       ID: 'html-id-def',
       Version: 'html-version-1',
@@ -1340,7 +1505,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'content-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/html-id-def/html-version-1.html');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/html-id-def/html-version-1.html');
     assert.strictEqual(putCommand.input.Body, htmlFile);
     assert.strictEqual(putCommand.input.ContentType, 'text/html');
   });
@@ -1373,6 +1538,7 @@ describe('Version Put', () => {
     const testParams = {
       Bucket: 'data-bucket',
       Org: 'testorg',
+      Repo: 'myrepo',
       Body: jsonFile,
       ID: 'json-id-ghi',
       Version: 'json-version-1',
@@ -1387,7 +1553,7 @@ describe('Version Put', () => {
     assert.strictEqual(sentCommands.length, 1);
     const putCommand = sentCommands[0];
     assert.strictEqual(putCommand.input.Bucket, 'data-bucket');
-    assert.strictEqual(putCommand.input.Key, 'testorg/.da-versions/json-id-ghi/json-version-1.json');
+    assert.strictEqual(putCommand.input.Key, 'testorg/myrepo/.da-versions/json-id-ghi/json-version-1.json');
     assert.strictEqual(putCommand.input.Body, jsonFile);
     assert.strictEqual(putCommand.input.ContentType, 'application/json');
   });
@@ -2208,7 +2374,7 @@ describe('Version Put', () => {
     assert.strictEqual(true, resp.versionCreated);
   });
 
-  it('putObjectWithVersion sets versionCreated false when version already existed (putVersion 412)', async () => {
+  it('putObjectWithVersion sets versionCreated true when version already existed (putVersion 412 = concurrent race)', async () => {
     const mockGetObject = async () => ({
       body: 'content',
       contentType: 'text/html',
@@ -2241,10 +2407,10 @@ describe('Version Put', () => {
       org: 'o', key: 'a.html', body: 'new', label: 'My version',
     }, true);
     assert.equal(200, resp.status);
-    assert.strictEqual(false, resp.versionCreated);
+    assert.strictEqual(true, resp.versionCreated);
   });
 
-  it('postObjectVersion returns 500 when version was not created (putVersion 412)', async () => {
+  it('postObjectVersion returns 201 when version already exists in R2 (putVersion 412 concurrent race)', async () => {
     const req = { json: async () => ({ label: 'my-label' }) };
     const env = {};
     const ctx = {
@@ -2252,7 +2418,7 @@ describe('Version Put', () => {
     };
 
     const mockGetObject = async () => ({
-      body: ReadableStream.from('doccontent'),
+      body: ReadableStream.from([new TextEncoder().encode('doccontent')]),
       contentType: 'text/html',
       contentLength: 10,
       metadata: { id: 'doc-id', version: 'ver-1' },
@@ -2279,7 +2445,7 @@ describe('Version Put', () => {
     });
 
     const resp = await postObjectVersion(req, env, ctx);
-    assert.equal(500, resp.status);
+    assert.equal(201, resp.status);
   });
 
   it('postObjectVersion returns 201 when version is successfully created', async () => {
@@ -2290,7 +2456,7 @@ describe('Version Put', () => {
     };
 
     const mockGetObject = async () => ({
-      body: ReadableStream.from('doccontent'),
+      body: ReadableStream.from([new TextEncoder().encode('doccontent')]),
       contentType: 'text/html',
       contentLength: 10,
       metadata: { id: 'doc-id', version: 'ver-1' },
@@ -2534,11 +2700,11 @@ describe('Version Put', () => {
       );
     });
 
-    it('retries writeAuditEntry on transient failure and succeeds on second attempt', async () => {
+    it('calls writeAuditEntry once and succeeds (retries are handled inside writeAuditEntry)', async () => {
       let callCount = 0;
       const mockWriteAuditEntry = async () => {
         callCount += 1;
-        if (callCount < 2) throw new Error('transient R2 error');
+        return { status: 200 };
       };
 
       const mockS3Client = { send: () => ({ $metadata: { httpStatusCode: 200 } }) };
@@ -2569,15 +2735,15 @@ describe('Version Put', () => {
         true,
       );
 
-      assert.strictEqual(resp.status, 200, 'document write must succeed despite transient audit error');
-      assert.strictEqual(callCount, 2, 'writeAuditEntry must be retried once after first failure');
+      assert.strictEqual(resp.status, 200, 'document write must succeed');
+      assert.strictEqual(callCount, 1, 'put.js must call writeAuditEntry exactly once (retries are handled inside writeAuditEntry)');
     });
 
-    it('logs error and continues when writeAuditEntry fails all retries', async () => {
+    it('writeAuditEntry returning status 500 does not affect main put result', async () => {
       let callCount = 0;
       const mockWriteAuditEntry = async () => {
         callCount += 1;
-        throw new Error('persistent R2 error');
+        return { status: 500, error: 'persistent R2 error' };
       };
 
       const mockS3Client = { send: () => ({ $metadata: { httpStatusCode: 200 } }) };
@@ -2597,31 +2763,19 @@ describe('Version Put', () => {
         '../../../src/storage/version/audit.js': { writeAuditEntry: mockWriteAuditEntry },
       });
 
-      const errors = [];
-      const origError = console.error;
-      console.error = (...args) => errors.push(args.map(String).join(' '));
-      let resp;
-      try {
-        resp = await putObjectWithVersion(
-          {},
-          {
-            org: 'o', ext: 'html', site: 'repo', users: [],
-          },
-          {
-            org: 'o', key: 'repo/p.html', body: 'edit', type: 'text/html',
-          },
-          true,
-        );
-      } finally {
-        console.error = origError;
-      }
-
-      assert.strictEqual(resp.status, 200, 'document write must succeed even when audit write is permanently failing');
-      assert.strictEqual(callCount, 3, 'writeAuditEntry must be attempted 3 times before giving up');
-      assert.ok(
-        errors.some((e) => e.includes('after 3 retries')),
-        'error after all retries exhausted must be logged with retry count',
+      const resp = await putObjectWithVersion(
+        {},
+        {
+          org: 'o', ext: 'html', site: 'repo', users: [],
+        },
+        {
+          org: 'o', key: 'repo/p.html', body: 'edit', type: 'text/html',
+        },
+        true,
       );
+
+      assert.strictEqual(resp.status, 200, 'document write must succeed even when audit returns 500');
+      assert.strictEqual(callCount, 1, 'writeAuditEntry must be called exactly once');
     });
 
     it('does not write audit for non-versionable type (e.g. PDF)', async () => {
@@ -2868,7 +3022,7 @@ describe('Version Put', () => {
       assert.strictEqual(resp.metadata.id, 'file-id-err');
     });
 
-    it('swallows writeAuditEntry error and still returns main put result', async () => {
+    it('writeAuditEntry returning status 500 does not prevent main put result', async () => {
       const mockGetObject = async () => ({
         status: 200,
         body: 'doc',
@@ -2890,7 +3044,7 @@ describe('Version Put', () => {
           ifMatch: () => s3Client,
         },
         '../../../src/storage/version/audit.js': {
-          writeAuditEntry: async () => { throw new Error('audit service unavailable'); },
+          writeAuditEntry: async () => ({ status: 500, error: 'audit service unavailable' }),
         },
       });
 
@@ -2900,14 +3054,43 @@ describe('Version Put', () => {
       const update = { org: 'o', key: 'repo/doc.html', type: 'text/html' };
       const resp = await putObjectWithVersion({}, daCtx, update, true);
 
-      // audit failure must not bubble up; main put succeeded
       assert.strictEqual(resp.status, 200);
       assert.strictEqual(resp.metadata.id, 'audit-err-id');
     });
   });
 
   describe('postObjectVersion with no JSON body', () => {
-    it('handles req.json() throwing (no body) and creates version with undefined label', async () => {
+    it('returns 400 when req.json() throws (no body)', async () => {
+      const { postObjectVersion } = await esmock('../../../src/storage/version/put.js', {});
+
+      const req = {
+        json: () => {
+          throw new Error('no body');
+        },
+      };
+      const daCtx = {
+        bucket: 'b', org: 'o', key: 'r/doc.html', ext: 'html', users: [],
+      };
+      const resp = await postObjectVersion(req, {}, daCtx);
+
+      assert.strictEqual(resp.status, 400);
+      assert.strictEqual(resp.error, 'label is required');
+    });
+
+    it('returns 400 when request body has label: null', async () => {
+      const { postObjectVersion } = await esmock('../../../src/storage/version/put.js', {});
+
+      const req = { json: async () => ({ label: null }) };
+      const daCtx = {
+        bucket: 'b', org: 'o', key: 'r/doc.html', ext: 'html', users: [],
+      };
+      const resp = await postObjectVersion(req, {}, daCtx);
+
+      assert.strictEqual(resp.status, 400);
+      assert.strictEqual(resp.error, 'label is required');
+    });
+
+    it('returns 201 when a valid label is provided', async () => {
       const mockGetObject = async () => ({
         body: 'content',
         contentType: 'text/html',
@@ -2934,24 +3117,74 @@ describe('Version Put', () => {
         '../../../src/storage/utils/config.js': { default: () => ({}) },
       });
 
-      // req.json() throws → label is undefined → postObjectVersionWithLabel(undefined, ...)
-      const req = {
-        json: () => {
-          throw new Error('no body');
-        },
-      };
+      const req = { json: async () => ({ label: 'My snapshot' }) };
       const daCtx = {
         bucket: 'b', org: 'o', key: 'r/doc.html', ext: 'html', users: [],
       };
       const resp = await postObjectVersion(req, {}, daCtx);
 
-      // No label means shouldCreateVersionObject is false → versionCreated stays false → 500
-      assert.strictEqual(resp.status, 500);
+      assert.strictEqual(resp.status, 201);
     });
   });
 
   describe('postObjectVersionWithLabel', () => {
-    it('returns 500 when versionCreated is false (version already exists / 412)', async () => {
+    it('returns 201 when main PUT 412s once then succeeds (ReadableStream body must survive retry)', async () => {
+      // Regression test for: ReadableStream disturbed on putObjectWithVersion retry.
+      // The real S3/R2 SDK consumes the request body before returning 412. When
+      // putObjectWithVersion retries with the same update.body ReadableStream, the
+      // stream is already disturbed, causing a TypeError and a 500 response.
+      //
+      // The fix buffers the stream to ArrayBuffer before the first PUT so the body
+      // survives retries. The mock enforces this by throwing when it sees a
+      // ReadableStream on the retry (simulating Cloudflare's "disturbed" error).
+      const req = { json: async () => ({ label: 'my-label' }) };
+      const env = {};
+      const ctx = {
+        bucket: 'mybucket', org: 'org123', key: 'doc.html', ext: 'html', users: [],
+      };
+
+      const mockGetObject = async () => ({
+        body: ReadableStream.from([new TextEncoder().encode('doccontent')]),
+        contentType: 'text/html',
+        contentLength: 10,
+        status: 200,
+        metadata: { id: 'doc-id', version: 'v1' },
+      });
+
+      let mainCallCount = 0;
+      const mainClient = {
+        async send(cmd) {
+          mainCallCount += 1;
+          if (mainCallCount === 1) {
+            const err = new Error('412');
+            err.$metadata = { httpStatusCode: 412 };
+            throw err;
+          }
+          // On retry: a ReadableStream body means it was not buffered — the real
+          // Cloudflare runtime would throw "disturbed" here. Enforce that invariant.
+          if (cmd.input.Body instanceof ReadableStream) {
+            throw new TypeError('This ReadableStream is disturbed (has already been read from), and cannot be used as a body.');
+          }
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+      const versionClient = {
+        async send() { return { $metadata: { httpStatusCode: 200 } }; },
+      };
+
+      const { postObjectVersion } = await esmock('../../../src/storage/version/put.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/utils/version.js': {
+          ifNoneMatch: () => versionClient,
+          ifMatch: () => mainClient,
+        },
+      });
+
+      const resp = await postObjectVersion(req, env, ctx);
+      assert.equal(201, resp.status);
+    });
+
+    it('returns 201 when version PUT gets 412 (concurrent race — version already exists in R2)', async () => {
       const mockGetObject = async () => ({
         body: 'doc content',
         contentType: 'text/html',
@@ -2965,7 +3198,8 @@ describe('Version Put', () => {
           return { $metadata: { httpStatusCode: 200 } };
         },
       };
-      // version put throws 412 → putVersion returns { status: 412 } → versionCreated stays false
+      // Concurrent request already created the version object; R2 returns 412 on our PUT.
+      // The version IS persisted — this request should still return 201, not 500.
       const versionClient = {
         async send() {
           const err = new Error('precondition failed');
@@ -2991,7 +3225,249 @@ describe('Version Put', () => {
       };
       const resp = await postObjectVersionWithLabel('My Label', {}, daCtx);
 
-      assert.strictEqual(resp.status, 500, 'must return 500 when version was not created');
+      assert.strictEqual(resp.status, 201, 'must return 201 when version already exists (concurrent 412)');
+    });
+
+    it('heals legacy octet-stream HTML on labelled version: snapshot + main object both repaired', async () => {
+      // Regression: legacy imports with missing or octet-stream ContentType could not be
+      // labelled-versioned because shouldCreateVersion gated out non-html/json. Recover the
+      // correct mime from the file extension so the version snapshot AND the main-object PUT
+      // both heal to text/html.
+      const versionWrites = [];
+      const mainWrites = [];
+      const auditCalls = [];
+
+      const mockGetObject = async () => ({
+        body: '<html>legacy</html>',
+        contentType: 'application/octet-stream',
+        contentLength: 18,
+        status: 200,
+        metadata: {
+          id: 'legacy-id', version: 'v1', timestamp: '123', users: '[]', path: '/mysite/legacy.html',
+        },
+        etag: '"etag1"',
+      });
+
+      const versionClient = {
+        async send(cmd) {
+          versionWrites.push(cmd.input);
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+      const mainClient = {
+        async send(cmd) {
+          mainWrites.push(cmd.input);
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+
+      const { postObjectVersionWithLabel } = await esmock('../../../src/storage/version/put.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/utils/version.js': {
+          ifNoneMatch: () => versionClient,
+          ifMatch: () => mainClient,
+        },
+        '../../../src/storage/version/audit.js': {
+          writeAuditEntry: async (env, ctx, repo, fileId, entry) => {
+            auditCalls.push({ repo, fileId, entry });
+          },
+        },
+        '../../../src/storage/utils/config.js': { default: () => ({}) },
+      });
+
+      const daCtx = {
+        bucket: 'b', org: 'o', site: 'mysite', key: 'mysite/legacy.html', ext: 'html', users: [],
+      };
+      const resp = await postObjectVersionWithLabel('Pre-import snapshot', {}, daCtx);
+
+      assert.strictEqual(resp.status, 201);
+      assert.strictEqual(versionWrites.length, 1, 'version snapshot must be written');
+      assert.strictEqual(versionWrites[0].ContentType, 'text/html', 'snapshot ContentType must heal to text/html');
+      assert.strictEqual(versionWrites[0].Metadata.Label, 'Pre-import snapshot');
+      assert.strictEqual(mainWrites.length, 1, 'main object PUT must run');
+      assert.strictEqual(mainWrites[0].ContentType, 'text/html', 'main object ContentType must heal in storage');
+      assert.strictEqual(auditCalls.length, 1, 'audit entry must be written');
+      assert.strictEqual(auditCalls[0].entry.versionLabel, 'Pre-import snapshot');
+      assert.ok(auditCalls[0].entry.versionId);
+    });
+
+    it('logs diagnostics and returns 500 when labelled version requested on non-versionable ext', async () => {
+      // Preserves the binary-never-version semantics: when the file extension does not map
+      // to a versionable mime (and the stored contentType is also not versionable), the
+      // labelled-version request still 500s and the diagnostic log fires with inferredType + ext
+      // captured so we can spot future legacy patterns in Cloudflare Logs.
+      const mockGetObject = async () => ({
+        body: 'binary content',
+        contentType: 'application/octet-stream',
+        contentLength: 14,
+        status: 200,
+        metadata: { id: 'bin-id', version: 'v1' },
+        etag: '"etag1"',
+      });
+
+      const s3Client = {
+        async send() { return { $metadata: { httpStatusCode: 200 } }; },
+      };
+
+      const { postObjectVersionWithLabel } = await esmock('../../../src/storage/version/put.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/utils/version.js': {
+          ifNoneMatch: () => s3Client,
+          ifMatch: () => s3Client,
+        },
+        '../../../src/storage/version/audit.js': { writeAuditEntry: async () => ({ status: 200 }) },
+        '../../../src/storage/utils/config.js': { default: () => ({}) },
+      });
+
+      const daCtx = {
+        bucket: 'b', org: 'o', site: 'mysite', key: 'mysite/data.bin', ext: 'bin', users: [],
+      };
+
+      const errors = [];
+      const origError = console.error;
+      console.error = (...args) => {
+        errors.push(args);
+      };
+      let resp;
+      try {
+        resp = await postObjectVersionWithLabel('My Label', {}, daCtx);
+      } finally {
+        console.error = origError;
+      }
+
+      assert.strictEqual(resp.status, 500);
+      assert.strictEqual(resp.error, 'Version was not created');
+      assert(errors.length > 0, 'diagnostic log must fire for the unhealed octet-stream path');
+      const payload = errors[0].find((a) => a && typeof a === 'object');
+      assert(payload, 'log must include a structured diagnostic payload');
+      assert.strictEqual(payload.contentType, 'application/octet-stream');
+      assert.strictEqual(payload.inferredType, 'application/octet-stream', 'inference must fall through for unknown ext');
+      assert.strictEqual(payload.ext, 'bin');
+      assert.strictEqual(payload.hadLabel, true);
+      assert.strictEqual(payload.currentStatus, 200);
+    });
+    it('plain PUT (no label) still skips auto-version for non-html/json contentType', async () => {
+      // Companion regression: the labelled-path mime inference must NOT bleed into plain
+      // PUTs. Auto-versioning on plain PUT must still gate to html/json (no extra storage cost).
+      const versionWrites = [];
+      const mainWrites = [];
+
+      const mockGetObject = async () => ({
+        body: 'binary content',
+        contentType: 'application/octet-stream',
+        contentLength: 14,
+        status: 200,
+        metadata: {
+          id: 'octet-id', version: 'v1', timestamp: '123', users: '[]', path: '/legacy/file',
+        },
+        etag: '"etag1"',
+      });
+
+      const versionClient = {
+        async send(cmd) {
+          versionWrites.push(cmd.input);
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+      const mainClient = {
+        async send(cmd) {
+          mainWrites.push(cmd.input);
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+
+      const { putObjectWithVersion } = await esmock('../../../src/storage/version/put.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/utils/version.js': {
+          ifNoneMatch: () => versionClient,
+          ifMatch: () => mainClient,
+        },
+      });
+
+      const daCtx = {
+        org: 'o', ext: 'bin', site: 'mysite', users: [{ email: 'u@x.com' }],
+      };
+      const update = {
+        org: 'o', key: 'mysite/legacy/file', body: 'new', type: 'application/octet-stream',
+      };
+      const resp = await putObjectWithVersion({}, daCtx, update, true);
+
+      assert.strictEqual(resp.status, 200);
+      assert.strictEqual(versionWrites.length, 0, 'no version snapshot for plain octet-stream PUT without label');
+      assert.strictEqual(mainWrites.length, 1, 'main object updated once');
+    });
+
+    it('returns 201 when version client body is a ReadableStream that would be disturbed by SDK retry', async () => {
+      // Regression test: putVersion passes current.body (a ReadableStream from getObject) to
+      // PutObjectCommand. The AWS SDK retries on network failures using the same stream — but a
+      // ReadableStream can only be consumed once. Cloudflare throws "non-retryable streaming
+      // request" on the retry, causing putVersion to fail with 500 and the overall operation to
+      // return 500 instead of 201.
+      //
+      // The fix buffers current.body to ArrayBuffer before passing it to putVersion so the SDK
+      // can retry freely. The mock enforces the invariant by throwing when it receives a
+      // ReadableStream (simulating Cloudflare's disturbed-stream error).
+      let versionCallCount = 0;
+      const versionClient = {
+        async send(cmd) {
+          versionCallCount += 1;
+          if (cmd.input.Body instanceof ReadableStream) {
+            // Simulate Cloudflare's "non-retryable streaming request" error that fires when
+            // the AWS SDK retries a PUT and the stream body is already consumed.
+            throw new TypeError('An error was encountered in a non-retryable streaming request.');
+          }
+          return { $metadata: { httpStatusCode: 200 } };
+        },
+      };
+
+      const mainClient = {
+        async send() { return { $metadata: { httpStatusCode: 200 } }; },
+      };
+
+      const mockGetObject = async (env, update, head) => {
+        if (head) {
+          return {
+            body: '',
+            status: 200,
+            contentType: 'text/html',
+            contentLength: 10,
+            metadata: {
+              id: 'doc-id', version: 'v1', timestamp: '123', users: '[]', path: '/doc.html',
+            },
+            etag: '"etag1"',
+          };
+        }
+        return {
+          body: ReadableStream.from([new TextEncoder().encode('doccontent')]),
+          status: 200,
+          contentType: 'text/html',
+          contentLength: 10,
+          metadata: {
+            id: 'doc-id', version: 'v1', timestamp: '123', users: '[]', path: '/doc.html',
+          },
+          etag: '"etag1"',
+        };
+      };
+
+      const { postObjectVersionWithLabel } = await esmock('../../../src/storage/version/put.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/utils/version.js': {
+          ifNoneMatch: () => versionClient,
+          ifMatch: () => mainClient,
+        },
+        '../../../src/storage/version/audit.js': {
+          writeAuditEntry: async () => ({ status: 200 }),
+        },
+        '../../../src/storage/utils/config.js': { default: () => ({}) },
+      });
+
+      const daCtx = {
+        bucket: 'b', org: 'o', key: 'doc.html', ext: 'html', users: [],
+      };
+      const resp = await postObjectVersionWithLabel('my-label', {}, daCtx);
+
+      assert.strictEqual(resp.status, 201);
+      assert.strictEqual(versionCallCount, 1, 'putVersion must be called exactly once');
     });
   });
 });

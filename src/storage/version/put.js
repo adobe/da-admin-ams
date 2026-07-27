@@ -21,9 +21,7 @@ import {
 } from '../utils/version.js';
 import getObject from '../object/get.js';
 import { writeAuditEntry } from './audit.js';
-import { versionKeyNew, versionKeyLegacy } from './paths.js';
-
-const AUDIT_WRITE_RETRIES = 3;
+import { versionKey } from './paths.js';
 
 export function getContentLength(body) {
   if (body === undefined) {
@@ -35,6 +33,8 @@ export function getContentLength(body) {
     return new Blob([body]).size;
   } else if (body instanceof File) {
     return body.size;
+  } else if (body instanceof ArrayBuffer) {
+    return body.byteLength;
   }
   return undefined;
 }
@@ -52,9 +52,7 @@ export async function putVersion(config, {
   const length = ContentLength ?? getContentLength(Body);
 
   const client = noneMatch ? ifNoneMatch(config) : new S3Client(config);
-  const key = Repo
-    ? `${Org}/${versionKeyNew(Repo, ID, Version, Ext)}`
-    : `${Org}/${versionKeyLegacy(ID, Version, Ext)}`;
+  const key = `${Org}/${versionKey(Repo, ID, Version, Ext)}`;
   const input = {
     Bucket, Key: key, Body, Metadata, ContentLength: length, ContentType,
   };
@@ -69,7 +67,7 @@ export async function putVersion(config, {
     // Cancel the body stream if it wasn't consumed (e.g. R2 rejected via 100-continue on 412).
     // Without this, Cloudflare Workers logs "non-retryable streaming request" warnings.
     if (Body?.cancel) Body.cancel();
-    return { status };
+    return { status, ...(status >= 500 ? { error: e.message } : {}) };
   }
 }
 
@@ -78,6 +76,16 @@ function shouldCreateVersion(contentType) {
   if (!contentType) return false;
   const type = contentType.toLowerCase();
   return type.startsWith('text/html') || type.startsWith('application/json');
+}
+
+// Infer a versionable contentType from the file extension when the stored
+// ContentType is missing or octet-stream (legacy imports). Returns the original
+// contentType when it is already versionable, or when we cannot map the extension.
+function inferVersionableType(contentType, ext) {
+  if (shouldCreateVersion(contentType)) return contentType;
+  if (ext === 'html') return 'text/html';
+  if (ext === 'json') return 'application/json';
+  return contentType;
 }
 
 function buildInput({
@@ -91,6 +99,8 @@ function buildInput({
   };
 }
 
+const MAX_PUT_ATTEMPTS = 5;
+
 export async function putObjectWithVersion(
   env,
   daCtx,
@@ -98,9 +108,15 @@ export async function putObjectWithVersion(
   body,
   guid,
   clientConditionals = null,
+  putAttempt = 0,
 ) {
   const config = getS3Config(env);
   const current = await getObject(env, update, false);
+  // Buffer current.body so it survives AWS SDK internal retries inside putVersion.
+  // A ReadableStream can only be consumed once; ArrayBuffer can be reused freely.
+  if (current.body instanceof ReadableStream) {
+    current.body = await new Response(current.body).arrayBuffer();
+  }
 
   let ID = current.metadata?.id;
   if (!ID) {
@@ -173,7 +189,7 @@ export async function putObjectWithVersion(
       const status = e.$metadata?.httpStatusCode || 500;
       if (status === 412) {
         // Only retry if no client conditionals (internal operation) and under retry limit
-        if (!effectiveConditionals?.ifNoneMatch) {
+        if (!effectiveConditionals?.ifNoneMatch && putAttempt < MAX_PUT_ATTEMPTS) {
           return putObjectWithVersion(
             env,
             daCtx,
@@ -181,6 +197,7 @@ export async function putObjectWithVersion(
             body,
             guid,
             clientConditionals,
+            putAttempt + 1,
           );
         }
         // Client conditional failed or max retries exceeded, return 412
@@ -189,7 +206,7 @@ export async function putObjectWithVersion(
 
       // eslint-disable-next-line no-console
       if (status >= 500) console.error('Failed to put object (in object with version)', e);
-      return { status, metadata: { id: ID } };
+      return { status, metadata: { id: ID }, ...(status >= 500 ? { error: e.message } : {}) };
     }
   }
 
@@ -222,7 +239,7 @@ export async function putObjectWithVersion(
       Repo: daCtx.site || undefined,
       Body: (body || storeBody ? current.body : ''),
       ContentLength: (body || storeBody ? current.contentLength : undefined),
-      ContentType: current.contentType,
+      ContentType: contentType,
       ID,
       Version,
       Ext: daCtx.ext,
@@ -237,7 +254,9 @@ export async function putObjectWithVersion(
     if (versionResp.status !== 200 && versionResp.status !== 412) {
       return { status: versionResp.status, metadata: { id: ID } };
     }
-    versionCreated = versionResp.status === 200;
+    // 412 means the version key already exists — a concurrent request created it first.
+    // The version IS persisted in R2, so treat it as created.
+    versionCreated = versionResp.status === 200 || versionResp.status === 412;
   }
 
   // Audit: one entry per versionable PUT; versionLabel + versionId when labelled version created.
@@ -248,25 +267,13 @@ export async function putObjectWithVersion(
     const pathForAudit = (daCtx.site && Path.startsWith(`${daCtx.site}/`))
       ? Path.slice(daCtx.site.length)
       : Path;
-    let auditErr;
-    for (let i = 0; i < AUDIT_WRITE_RETRIES; i += 1) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await writeAuditEntry(env, { bucket: input.Bucket, org: daCtx.org }, daCtx.site, ID, {
-          timestamp: Timestamp,
-          users: Users,
-          path: pathForAudit,
-          versionLabel,
-          versionId,
-        });
-        auditErr = null;
-        break;
-      } catch (e) { auditErr = e; }
-    }
-    if (auditErr) {
-      // eslint-disable-next-line no-console
-      console.error(`Failed to write audit entry after ${AUDIT_WRITE_RETRIES} retries`, auditErr);
-    }
+    await writeAuditEntry(env, { bucket: input.Bucket, org: daCtx.org }, daCtx.site, ID, {
+      timestamp: Timestamp,
+      users: Users,
+      path: pathForAudit,
+      versionLabel,
+      versionId,
+    });
   }
 
   const metadata = {
@@ -302,8 +309,13 @@ export async function putObjectWithVersion(
   } catch (e) {
     const status = e.$metadata?.httpStatusCode || 500;
     if (status === 412) {
-      // Only retry if no client conditionals (internal operation) and under retry limit
-      if (!effectiveConditionals?.ifMatch) {
+      // Retry when no client conditional (internal operation) or when the client sent
+      // If-Match: * (wildcard — asserts existence only, already verified above; a concurrent
+      // write changed the ETag, so re-fetch and retry like the no-conditional path).
+      // A specific ETag means the client explicitly requires that version, so propagate 412.
+      const shouldRetry = !effectiveConditionals?.ifMatch
+        || effectiveConditionals.ifMatch === '*';
+      if (shouldRetry && putAttempt < MAX_PUT_ATTEMPTS) {
         return putObjectWithVersion(
           env,
           daCtx,
@@ -311,28 +323,51 @@ export async function putObjectWithVersion(
           body,
           guid,
           clientConditionals,
+          putAttempt + 1,
         );
       }
-      // Client conditional failed or max retries exceeded, return 412
       return { status: 412, metadata: { id: ID } };
     }
 
     // eslint-disable-next-line no-console
     if (status >= 500) console.error('Failed to version (in object with version)', e);
-    return { status, metadata: { id: ID } };
+    return { status, metadata: { id: ID }, ...(status >= 500 ? { error: e.message } : {}) };
   }
 }
 
 export async function postObjectVersionWithLabel(label, env, daCtx) {
-  const { body, contentLength, contentType } = await getObject(env, daCtx);
+  const {
+    body, contentLength, contentType, status: currentStatus,
+  } = await getObject(env, daCtx);
+  // Buffer the ReadableStream so the body survives retries inside putObjectWithVersion.
+  // A ReadableStream can only be consumed once; ArrayBuffer can be reused freely.
+  const bodyBuffer = body instanceof ReadableStream ? await new Response(body).arrayBuffer() : body;
   const { bucket, org, key } = daCtx;
 
+  // Legacy imports may have lost their ContentType metadata (stored as
+  // application/octet-stream). Recover the correct mime from the file
+  // extension so the version write + main-object PUT both heal.
+  const inferredType = inferVersionableType(contentType, daCtx.ext);
+
   const resp = await putObjectWithVersion(env, daCtx, {
-    bucket, org, key, body, contentLength, type: contentType, label,
+    bucket, org, key, body: bodyBuffer, contentLength, type: inferredType, label,
   }, true);
 
   if (resp.status !== 200) return { status: resp.status };
-  if (!resp.versionCreated) return { status: 500 };
+  if (!resp.versionCreated) {
+    // Diagnostic: the silent-500 path lands here when the source object's contentType
+    // is not html/json (e.g. legacy imports with missing ContentType metadata) so
+    // shouldCreateVersion gates out and no version is written.
+    // eslint-disable-next-line no-console
+    console.error('Failed to version (no version created)', {
+      contentType,
+      inferredType,
+      ext: daCtx.ext,
+      hadLabel: label != null,
+      currentStatus,
+    });
+    return { status: 500, error: 'Version was not created' };
+  }
   return { status: 201 };
 }
 
@@ -344,5 +379,6 @@ export async function postObjectVersion(req, env, daCtx) {
     // no body
   }
   const label = reqJSON?.label;
-  return /* await */ postObjectVersionWithLabel(label, env, daCtx);
+  if (!label) return { status: 400, error: 'label is required' };
+  return postObjectVersionWithLabel(label, env, daCtx);
 }

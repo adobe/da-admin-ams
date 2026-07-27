@@ -511,6 +511,7 @@ describe('Version Audit', () => {
       });
 
       assert.strictEqual(result.status, 500);
+      assert.strictEqual(result.error, 'server error');
     });
 
     it('appends three entries when edit then version then edit (version breaks time window)', async () => {
@@ -643,7 +644,7 @@ describe('Version Audit', () => {
       assert.strictEqual(putCalls[0].IfMatch, undefined, 'If-Match must be absent for first write');
     });
 
-    it('retries once on 412 from PUT and succeeds on second attempt', async () => {
+    it('retries on 412 from PUT and succeeds on a later attempt', async () => {
       let getCallCount = 0;
       const putCalls = [];
 
@@ -666,8 +667,8 @@ describe('Version Audit', () => {
                 }
                 if (cmd instanceof PutObjectCommand) {
                   putCalls.push(cmd.input);
-                  if (putCalls.length === 1) {
-                    // First PUT: simulate concurrent write → 412
+                  if (putCalls.length < 3) {
+                    // First two PUTs: simulate concurrent write → 412
                     const err = new Error('precondition failed');
                     err.$metadata = { httpStatusCode: 412 };
                     throw err;
@@ -691,10 +692,11 @@ describe('Version Audit', () => {
       });
 
       assert.strictEqual(result.status, 200);
-      assert.strictEqual(getCallCount, 2, 'must re-read on retry');
-      assert.strictEqual(putCalls.length, 2, 'must retry the PUT');
+      assert.strictEqual(getCallCount, 3, 'must re-read on each retry');
+      assert.strictEqual(putCalls.length, 3, 'must retry the PUT until success');
       assert.strictEqual(putCalls[0].IfMatch, '"etag-1"');
-      assert.strictEqual(putCalls[1].IfMatch, '"etag-2"', 'retry uses fresh ETag');
+      assert.strictEqual(putCalls[1].IfMatch, '"etag-2"', 'first retry uses fresh ETag');
+      assert.strictEqual(putCalls[2].IfMatch, '"etag-3"', 'second retry uses fresh ETag');
     });
 
     it('archives existing content and starts fresh when entry count reaches AUDIT_MAX_ENTRIES', async () => {
@@ -812,7 +814,10 @@ describe('Version Audit', () => {
       assert.strictEqual(lines.length, 2, 'both entries must be present (no collapse across mismatched users)');
     });
 
-    it('returns status 500 when PUT 412 on retry attempt (no further retries)', async () => {
+    it('returns status 500 when PUT 412 persists across all 7 attempts', async () => {
+      let getCallCount = 0;
+      let putCallCount = 0;
+
       const makeBody = () => new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode(''));
@@ -827,9 +832,11 @@ describe('Version Audit', () => {
             S3Client: function S3Client() {
               this.send = async (cmd) => {
                 if (cmd instanceof GetObjectCommand) {
+                  getCallCount += 1;
                   return { Body: makeBody(), ETag: '"etag-x"' };
                 }
                 if (cmd instanceof PutObjectCommand) {
+                  putCallCount += 1;
                   const err = new Error('precondition failed');
                   err.$metadata = { httpStatusCode: 412 };
                   throw err;
@@ -850,7 +857,148 @@ describe('Version Audit', () => {
         path: 'repo/doc.html',
       });
 
-      assert.strictEqual(result.status, 500, 'persistent 412 must surface as 500 after one retry');
+      assert.strictEqual(result.status, 500, 'persistent 412 must surface as 500 after 7 total attempts');
+      assert.strictEqual(result.error, 'precondition failed');
+      assert.strictEqual(putCallCount, 7, 'must attempt PUT 7 times total (1 initial + 6 retries)');
+      assert.strictEqual(getCallCount, 7, 'must re-read on each attempt');
+    });
+
+    it('uses exponential jitter backoff (0-50, 0-100, 0-200, 0-400, 0-800, 0-1600 ms) across six 412 retries', async () => {
+      // Stubs setTimeout and Math.random to capture per-retry delays.
+      // Asserts per-attempt exponential upper bounds for the 6-retry ladder
+      // (50, 100, 200, 400, 800, 1600 ms) and total elapsed sleep ~3050 ms.
+      const originalSetTimeout = globalThis.setTimeout;
+      const originalRandom = Math.random;
+      const delays = [];
+      Math.random = () => 0.999999;
+      globalThis.setTimeout = (fn, ms) => {
+        delays.push(ms);
+        fn();
+        return 0;
+      };
+
+      try {
+        const makeBody = () => new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(''));
+            controller.close();
+          },
+        });
+
+        const { writeAuditEntry } = await esmock(
+          '../../../src/storage/version/audit.js',
+          {
+            '@aws-sdk/client-s3': {
+              S3Client: function S3Client() {
+                this.send = async (cmd) => {
+                  if (cmd instanceof GetObjectCommand) {
+                    return { Body: makeBody(), ETag: '"etag-x"' };
+                  }
+                  if (cmd instanceof PutObjectCommand) {
+                    const err = new Error('precondition failed');
+                    err.$metadata = { httpStatusCode: 412 };
+                    throw err;
+                  }
+                  return { $metadata: { httpStatusCode: 200 } };
+                };
+              },
+              GetObjectCommand,
+              PutObjectCommand,
+            },
+            '../../../src/storage/utils/config.js': { default: () => ({}) },
+          },
+        );
+
+        await writeAuditEntry({}, { bucket: 'b', org: 'o' }, 'repo', 'fid', {
+          timestamp: '5000',
+          users: '[{"email":"u@x.com"}]',
+          path: 'repo/doc.html',
+        });
+      } finally {
+        globalThis.setTimeout = originalSetTimeout;
+        Math.random = originalRandom;
+      }
+
+      assert.strictEqual(delays.length, 6, 'must sleep between each of the 6 retries');
+      const upperBounds = [50, 100, 200, 400, 800, 1600];
+      delays.forEach((ms, i) => {
+        assert.ok(
+          ms >= 0 && ms < upperBounds[i],
+          `delay[${i}]=${ms} must be within [0, ${upperBounds[i]})`,
+        );
+      });
+      assert.ok(
+        delays[2] >= 150,
+        `delay[2]=${delays[2]} must exceed the prior linear cap of 150 ms`,
+      );
+      assert.ok(
+        delays[3] >= 200,
+        `delay[3]=${delays[3]} must exceed the prior linear cap of 200 ms`,
+      );
+      assert.ok(
+        delays[5] >= 800,
+        `delay[5]=${delays[5]} must reach the new 6-retry exponential ceiling (>=800 ms)`,
+      );
+      const total = delays.reduce((a, b) => a + b, 0);
+      assert.ok(
+        total > 1500,
+        `total elapsed sleep ${total} must exceed prior 4-retry worst-case (~750 ms)`,
+      );
+      assert.ok(
+        total < 3200,
+        `total elapsed sleep ${total} must stay within the new 6-retry worst-case (~3050 ms)`,
+      );
+    });
+
+    it('succeeds on the 5th attempt after four 412s', async () => {
+      let getCallCount = 0;
+      let putCallCount = 0;
+
+      const makeBody = () => new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(''));
+          controller.close();
+        },
+      });
+
+      const { writeAuditEntry } = await esmock(
+        '../../../src/storage/version/audit.js',
+        {
+          '@aws-sdk/client-s3': {
+            S3Client: function S3Client() {
+              this.send = async (cmd) => {
+                if (cmd instanceof GetObjectCommand) {
+                  getCallCount += 1;
+                  return { Body: makeBody(), ETag: `"etag-${getCallCount}"` };
+                }
+                if (cmd instanceof PutObjectCommand) {
+                  putCallCount += 1;
+                  if (putCallCount < 5) {
+                    const err = new Error('precondition failed');
+                    err.$metadata = { httpStatusCode: 412 };
+                    throw err;
+                  }
+                  return { $metadata: { httpStatusCode: 200 } };
+                }
+                return { $metadata: { httpStatusCode: 200 } };
+              };
+            },
+            GetObjectCommand,
+            PutObjectCommand,
+          },
+          '../../../src/storage/utils/config.js': { default: () => ({}) },
+        },
+      );
+
+      const result = await writeAuditEntry({}, { bucket: 'b', org: 'o' }, 'repo', 'fid', {
+        timestamp: '5000',
+        users: '[{"email":"u@x.com"}]',
+        path: 'repo/doc.html',
+      });
+
+      assert.strictEqual(result.status, 200, 'must succeed on the 5th attempt');
+      assert.strictEqual(putCallCount, 5, 'must have attempted PUT 5 times');
+      assert.strictEqual(getCallCount, 5, 'must re-read on each attempt');
     });
   });
 });

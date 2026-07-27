@@ -118,6 +118,7 @@ describe('Move', () => {
     const resp = await moveObject({}, ctx, { source: 'somewhere', destination: 'somedest' });
 
     assert.strictEqual(resp.status, 500);
+    assert.strictEqual(resp.error, 'R2 throttled');
     const body = JSON.parse(resp.body);
     assert.strictEqual(body.error, 'move_failed');
   });
@@ -161,10 +162,128 @@ describe('Move', () => {
 
     // a.html (from initialKeys) throws, b.html succeeds — one failure, one success
     assert.strictEqual(resp.status, 500);
+    assert.strictEqual(resp.error, 'R2 throttled');
     const body = JSON.parse(resp.body);
     assert.strictEqual(body.error, 'partial_failure');
     assert.strictEqual(body.failed, 1);
     assert.strictEqual(deleteObjectCalled.length, 1, 'b.html should still be deleted despite a.html failing');
+  });
+
+  it('logs the error when S3 list throws (move_failed path produces empty Cloudflare Logs)', async () => {
+    // Regression: move_failed returns 500 with no console.error, so Cloudflare Logs is empty
+    // and the root cause is invisible in production.
+    mockSendFn = () => {
+      throw new Error('R2 503 ServiceUnavailable');
+    };
+
+    const moveObject = await esmock('../../../src/storage/object/move.js', {
+      '@aws-sdk/client-s3': { S3Client: MockS3Client },
+      '../../../src/storage/object/copy.js': { copyFile: () => {} },
+      '../../../src/storage/object/delete.js': { deleteObject: () => {} },
+    });
+
+    const errors = [];
+    const origError = console.error;
+    console.error = (...args) => {
+      errors.push(args);
+    };
+    try {
+      await moveObject(
+        {},
+        {
+          org: 'myorg', aclCtx: { pathLookup: new Map() }, users: [], key: 'q.html',
+        },
+        { source: 'somewhere', destination: 'somedest' },
+      );
+    } finally {
+      console.error = origError;
+    }
+
+    assert(errors.length > 0, 'move_failed must log the error so it appears in Cloudflare Logs');
+    assert(
+      errors[0].some((a) => a instanceof Error || typeof a === 'string'),
+      'logged value must include the error or a message',
+    );
+  });
+
+  it('logs the error when a file copy rejects (partial_failure path produces empty Cloudflare Logs)', async () => {
+    // Regression: partial_failure returns 500 with no console.error, so Cloudflare Logs is empty
+    // and the root cause is invisible in production.
+    mockSendFn = () => ({ Contents: [] });
+
+    const moveObject = await esmock('../../../src/storage/object/move.js', {
+      '@aws-sdk/client-s3': { S3Client: MockS3Client },
+      '../../../src/storage/object/copy.js': {
+        copyFile: () => {
+          throw new Error('R2 503 ServiceUnavailable');
+        },
+      },
+      '../../../src/storage/object/delete.js': { deleteObject: () => ({ status: 204 }) },
+    });
+
+    const pathLookup = new Map();
+    pathLookup.set('blah@foo.org', [
+      { path: '/somewhere/+**', actions: ['read', 'write'] },
+      { path: '/somedest/+**', actions: ['read', 'write'] },
+    ]);
+    const ctx = {
+      org: 'myorg',
+      aclCtx: { pathLookup },
+      users: [{ email: 'blah@foo.org' }],
+      isFile: true,
+      key: 'q.html',
+    };
+
+    const errors = [];
+    const origError = console.error;
+    console.error = (...args) => {
+      errors.push(args);
+    };
+    try {
+      await moveObject({}, ctx, { source: 'somewhere/a.html', destination: 'somedest/a.html' });
+    } finally {
+      console.error = origError;
+    }
+
+    assert(errors.length > 0, 'partial_failure must log the error so it appears in Cloudflare Logs');
+    assert(
+      errors[0].some((a) => a instanceof Error || typeof a === 'string'),
+      'logged value must include the error or a message',
+    );
+  });
+
+  it('Returns 204 (not 500) when some source keys do not exist (NoSuchKey)', async () => {
+    mockSendFn = () => ({ Contents: [{ Key: 'myorg/somewhere/b.html' }] });
+
+    const copyFileCalled = [];
+    const copyFile = (c, e, x, k) => {
+      copyFileCalled.push(k);
+      return { $metadata: { httpStatusCode: 404 } };
+    };
+
+    const moveObject = await esmock('../../../src/storage/object/move.js', {
+      '@aws-sdk/client-s3': { S3Client: MockS3Client },
+      '../../../src/storage/object/copy.js': { copyFile },
+      '../../../src/storage/object/delete.js': { deleteObject: () => ({ status: 204 }) },
+    });
+
+    const pathLookup = new Map();
+    pathLookup.set('blah@foo.org', [
+      { path: '/somewhere/+**', actions: ['read', 'write'] },
+      { path: '/somedest/+**', actions: ['read', 'write'] },
+    ]);
+    const ctx = {
+      org: 'myorg',
+      aclCtx: { pathLookup },
+      users: [{ email: 'blah@foo.org' }],
+      isFile: false,
+      key: 'q.html',
+    };
+    const resp = await moveObject({}, ctx, { source: 'somewhere', destination: 'somedest' });
+
+    assert.strictEqual(resp.status, 204);
+    assert(copyFileCalled.includes('somewhere'), 'copyFile must be called for the source key');
+    assert(copyFileCalled.includes('somewhere/b.html'), 'copyFile must be called for listed keys');
   });
 
   it('Does not re-process page 1 keys on page 2 iteration', async () => {

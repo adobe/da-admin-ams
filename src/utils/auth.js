@@ -61,7 +61,14 @@ export async function setUser(userId, expiration, reqHeaders, env) {
     orgs,
   });
 
-  await env.DA_AUTH.put(userId, value, { expiration });
+  try {
+    await env.DA_AUTH.put(userId, value, { expiration });
+  } catch (e) {
+    // KV rejects expiration timestamps < 60s in the future (near-expiry tokens).
+    // Log and continue — user is still authenticated, just not cached.
+    // eslint-disable-next-line no-console
+    console.error('Failed to cache user in KV', e);
+  }
   return value;
 }
 
@@ -147,7 +154,7 @@ export async function getUsers(req, env) {
     if (type !== 'access_token') return { email: 'anonymous' };
 
     const expires = Number(createdAt) + Number(expiresIn);
-    const now = Math.floor(new Date().getTime() / 1000);
+    const now = Date.now();
 
     if (expires < now) return { email: 'anonymous' };
     // Find the user in recent sessions
@@ -221,6 +228,37 @@ export function pathSorter({ path: path1 }, { path: path2 }) {
   return sp2.length - sp1.length;
 }
 
+/**
+ * Resolve the keyword path that governs access to a config resource.
+ *
+ * Org-level config (`/config/{org}`) is always governed by the `CONFIG` keyword.
+ * Site-level config (`/config/{org}/{site}/...`) is governed by a per-site
+ * `/{site}/CONFIG` keyword, but only when such a rule is actually present in the
+ * permissions sheet. When no `/{site}/CONFIG` rule is specified, site config access
+ * falls back to the org-level `CONFIG` rule. The `CONFIG` portion is always uppercase
+ * so it cannot collide with a content path.
+ *
+ * @param {Map} pathLookup the parsed permissions, keyed by ident
+ * @param {string} [site] the site, if this is a site config request
+ * @returns {string} the keyword path governing this config resource
+ */
+function resolveConfigKey(pathLookup, site) {
+  if (!site) return 'CONFIG';
+  const siteKey = `/${site}/CONFIG`;
+  for (const entries of pathLookup?.values() ?? []) {
+    if (entries.some((entry) => entry.path === siteKey)) return siteKey;
+  }
+  return 'CONFIG';
+}
+
+/**
+ * The keyword path that governs access to the config resource of the given request.
+ * @see resolveConfigKey
+ */
+export function configPermissionPath(daCtx) {
+  return resolveConfigKey(daCtx.aclCtx?.pathLookup, daCtx.site);
+}
+
 export async function getAclCtx(env, org, users, key, api) {
   const pathLookup = new Map();
 
@@ -231,7 +269,14 @@ export async function getAclCtx(env, org, users, key, api) {
     };
   }
 
-  const props = await env.DA_CONFIG?.get(org, { type: 'json' });
+  let props;
+  try {
+    props = await env.DA_CONFIG?.get(org, { type: 'json' });
+  } catch {
+    // KV rejects keys longer than 512 bytes (e.g. IMS auth fragments leaking into the URL path).
+    // Treat as no config found — deny all access rather than propagating a 500.
+    return { pathLookup, actionSet: new Set() };
+  }
 
   if (props && props[':type'] === 'sheet' && props[':sheetname'] === 'permissions') {
     // It's a single-sheet, move the data to the right place
@@ -254,6 +299,19 @@ export async function getAclCtx(env, org, users, key, api) {
     props.permissions.data.push({
       path: '/ + **',
       groups: env.DA_OPS_IMS_ORG,
+      actions: 'write',
+    });
+  }
+
+  if (env.DA_OPS_IMS_BOT_EMAIL) {
+    props.permissions.data.push({
+      path: 'CONFIG',
+      groups: env.DA_OPS_IMS_BOT_EMAIL,
+      actions: 'write',
+    });
+    props.permissions.data.push({
+      path: '/ + **',
+      groups: env.DA_OPS_IMS_BOT_EMAIL,
       actions: 'write',
     });
   }
@@ -301,7 +359,8 @@ export async function getAclCtx(env, org, users, key, api) {
   // Do a lookup for the base key, we always need this info
   let k;
   if (api === 'config') {
-    k = 'CONFIG';
+    const [site] = key.split('/').filter((part) => part.length > 0);
+    k = resolveConfigKey(pathLookup, site);
   } else {
     k = key.startsWith('/') ? key : `/${key}`;
   }
@@ -327,7 +386,7 @@ export async function getAclCtx(env, org, users, key, api) {
     ? actionTrace
     : undefined;
 
-  if (k === 'CONFIG' || api === 'versionsource') {
+  if (api === 'config' || api === 'versionsource') {
     actionSet.add('read');
   }
 

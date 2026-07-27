@@ -46,6 +46,22 @@ describe('Storage Object Utils tests', () => {
     assert.strictEqual(called.length, 0, 'should not have invalidated anything');
   });
 
+  it('does not throw when collab response has null body', async () => {
+    // Regression test: notifyCollab calls resp.body.cancel() unconditionally. When the collab
+    // service returns a response with no body (null), this throws TypeError: Cannot read
+    // properties of null (reading 'cancel'). In copyFile this fires in a finally block,
+    // which cancels the return value and causes the move to fail with partial_failure 500 —
+    // leaving the file duplicated at both source and destination.
+    const env = {
+      dacollab: {
+        fetch: async () => ({ body: null }),
+      },
+    };
+    await assert.doesNotReject(
+      notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.html', env),
+    );
+  });
+
   it('Should invalidate (with shared secret', async () => {
     const called = [];
     const env = {
@@ -63,5 +79,30 @@ describe('Storage Object Utils tests', () => {
     await notifyCollab('syncadmin', 'https://admin.da.live/source/a/b/c.html', env);
     assert.strictEqual(called.length, 1);
     assert.strictEqual(called[0], 'https://localhost/api/v1/syncadmin?doc=https://admin.da.live/source/a/b/c.html');
+  });
+
+  it('Should not throw when collab returns a null-body response (e.g. 204)', async () => {
+    // Reproduces the case where da-collab's deleteAdmin handler returns
+    // `new Response(null, { status: 204 })` — common when a doc is open in
+    // another window and gets invalidated. In that case `resp.body` is null,
+    // and calling `.cancel()` on it would throw if not optional-chained.
+    const called = [];
+    const env = {
+      dacollab: {
+        fetch: async (url) => {
+          called.push(url);
+          // Mirror the shape of a Workers Response with a 204 status:
+          // body is null, so resp.body.cancel() would TypeError without `?.`.
+          return { status: 204, body: null };
+        },
+      },
+    };
+
+    await assert.doesNotReject(
+      () => notifyCollab('deleteadmin', 'https://admin.da.live/source/a/b/c.html', env),
+      'notifyCollab must tolerate a null response body',
+    );
+    assert.strictEqual(called.length, 1);
+    assert.strictEqual(called[0], 'https://localhost/api/v1/deleteadmin?doc=https://admin.da.live/source/a/b/c.html');
   });
 });

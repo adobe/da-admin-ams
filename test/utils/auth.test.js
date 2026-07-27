@@ -19,6 +19,7 @@ import env from './mocks/env.js';
 import jose from './mocks/jose.js';
 import fetch from './mocks/fetch.js';
 import {
+  configPermissionPath,
   getAclCtx,
   getChildRules,
   getUserActions,
@@ -58,6 +59,39 @@ describe('DA auth', () => {
     it('anonymous if expired', async () => {
       const users = await getUsers(reqs.folder, env);
       assert.strictEqual(users[0].email, 'anonymous');
+    });
+
+    it('anonymous if token expired with realistic IMS ms-scale timestamps', async () => {
+      // IMS JWT fields: created_at and expires_in are in milliseconds.
+      // Bug: auth.js computes `now` in seconds; ms-scale `expires` is always larger,
+      // so expired tokens are never rejected.
+      // Token issued 2h ago, valid for only 1h — clearly expired.
+      const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+
+      const { getUsers: getUsersMsExpired } = await esmock('../../src/utils/auth.js', {
+        jose: {
+          createRemoteJWKSet: () => null,
+          jwksCache: 'cache-key',
+          jwtVerify: () => ({
+            payload: {
+              type: 'access_token',
+              user_id: 'user@example.com',
+              created_at: Date.now() - TWO_HOURS_MS,
+              expires_in: ONE_HOUR_MS,
+            },
+          }),
+        },
+      });
+
+      const req = new Request('https://da.live/source/cq/test', {
+        headers: new Headers({ Authorization: 'Bearer sometoken' }),
+      });
+
+      await withMockedFetch(async () => {
+        const users = await getUsersMsExpired(req, env);
+        assert.strictEqual(users[0].email, 'anonymous');
+      });
     });
 
     it('authorized if email matches', async () => {
@@ -117,6 +151,29 @@ describe('DA auth', () => {
         },
       ];
       assert.deepStrictEqual(expectedOrgs, userValue.orgs);
+    });
+
+    it('returns user value when KV PUT fails for near-expiry token', async () => {
+      // Near-expiry tokens have < 60s remaining; KV rejects the expiration timestamp.
+      // Bug: the thrown error propagates up through getUsers -> getDaCtx -> 500.
+      // Fix: setUser must catch the KV PUT failure and still return the user value.
+      const headers = new Headers({ Authorization: 'Bearer aparker@geometrixx.info' });
+      const kvPutError = new Error(
+        'KV PUT failed: 400 Invalid expiration of 1777144621.'
+        + ' Expiration times must be at least 60 seconds in the future.',
+      );
+      const failEnv = {
+        ...env,
+        DA_AUTH: { ...env.DA_AUTH, put: () => { throw kvPutError; } },
+      };
+
+      let userValue;
+      await withMockedFetch(async () => {
+        const userValStr = await setUser('aparker@geometrixx.info', 100, headers, failEnv);
+        userValue = JSON.parse(userValStr);
+      });
+
+      assert.strictEqual(userValue.email, 'aparker@geometrixx.info');
     });
   });
 
@@ -475,6 +532,106 @@ describe('DA auth', () => {
       assert(!aclCtx.actionSet.has('write'));
     });
 
+    it('configPermissionPath returns CONFIG for org config', () => {
+      assert.strictEqual(configPermissionPath({}), 'CONFIG');
+    });
+
+    it('configPermissionPath returns /{site}/CONFIG when a site rule exists', () => {
+      const pathLookup = new Map([
+        ['someone@bloggs.org', [{ path: '/mysite/CONFIG', actions: ['read'] }]],
+      ]);
+      const daCtx = { site: 'mysite', aclCtx: { pathLookup } };
+      assert.strictEqual(configPermissionPath(daCtx), '/mysite/CONFIG');
+    });
+
+    it('configPermissionPath falls back to CONFIG when no site rule exists', () => {
+      const pathLookup = new Map([
+        ['someone@bloggs.org', [{ path: 'CONFIG', actions: ['write'] }]],
+      ]);
+      const daCtx = { site: 'mysite', aclCtx: { pathLookup } };
+      assert.strictEqual(configPermissionPath(daCtx), 'CONFIG');
+    });
+
+    it('test site CONFIG governs site config read when a site rule is specified', async () => {
+      const siteConfig = {
+        test: {
+          ':type': 'sheet',
+          ':sheetname': 'permissions',
+          data: [
+            { path: '/mysite/CONFIG', groups: 'reader@bloggs.org', actions: 'read' },
+            { path: 'CONFIG', groups: 'orgadmin@bloggs.org', actions: 'write' },
+          ],
+        },
+      };
+      const siteEnv = { DA_CONFIG: { get: (name) => siteConfig[name] } };
+
+      // Build a site-config daCtx for the given users.
+      const ctxFor = async (users, site) => {
+        const aclCtx = await getAclCtx(siteEnv, 'test', users, `${site}/config.json`, 'config');
+        return {
+          users, org: 'test', aclCtx, key: `${site}/config.json`, site,
+        };
+      };
+
+      const reader = [{ email: 'reader@bloggs.org' }];
+      const readerCtx = await ctxFor(reader, 'mysite');
+
+      // The index.js gate always allows reaching the config route for config requests.
+      assert(readerCtx.aclCtx.actionSet.has('read'));
+
+      // A /mysite/CONFIG rule exists, so the site keyword governs this site's config.
+      assert.strictEqual(configPermissionPath(readerCtx), '/mysite/CONFIG');
+
+      // The reader can read this site's config.
+      assert(hasPermission(readerCtx, configPermissionPath(readerCtx), 'read', true));
+      // ...but cannot write it.
+      assert(!hasPermission(readerCtx, configPermissionPath(readerCtx), 'write', true));
+
+      // An org-CONFIG holder without /mysite/CONFIG cannot read this site's config,
+      // because a /mysite/CONFIG rule is specified (no fallback to the CONFIG rule).
+      const orgAdmin = [{ email: 'orgadmin@bloggs.org' }];
+      const orgAdminCtx = await ctxFor(orgAdmin, 'mysite');
+      assert.strictEqual(configPermissionPath(orgAdminCtx), '/mysite/CONFIG');
+      assert(!hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'read', true));
+    });
+
+    it('test site config falls back to CONFIG rule when no site rule is specified', async () => {
+      const siteConfig = {
+        test: {
+          ':type': 'sheet',
+          ':sheetname': 'permissions',
+          data: [
+            // Note: no /othersite/CONFIG rule is specified anywhere.
+            { path: 'CONFIG', groups: 'orgadmin@bloggs.org', actions: 'write' },
+            { path: '/mysite/CONFIG', groups: 'reader@bloggs.org', actions: 'read' },
+          ],
+        },
+      };
+      const siteEnv = { DA_CONFIG: { get: (name) => siteConfig[name] } };
+
+      const ctxFor = async (users, site) => {
+        const aclCtx = await getAclCtx(siteEnv, 'test', users, `${site}/config.json`, 'config');
+        return {
+          users, org: 'test', aclCtx, key: `${site}/config.json`, site,
+        };
+      };
+
+      // No /othersite/CONFIG rule -> falls back to the org-level CONFIG rule.
+      const orgAdmin = [{ email: 'orgadmin@bloggs.org' }];
+      const orgAdminCtx = await ctxFor(orgAdmin, 'othersite');
+      assert.strictEqual(configPermissionPath(orgAdminCtx), 'CONFIG');
+      // The CONFIG rule grants orgAdmin write (and therefore read) on this site's config.
+      assert(hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'read', true));
+      assert(hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'write', true));
+
+      // A user with only /mysite/CONFIG does not inherit access to othersite via the
+      // fallback, since the fallback follows the CONFIG rule which they do not hold.
+      const reader = [{ email: 'reader@bloggs.org' }];
+      const readerCtx = await ctxFor(reader, 'othersite');
+      assert.strictEqual(configPermissionPath(readerCtx), 'CONFIG');
+      assert(!hasPermission(readerCtx, configPermissionPath(readerCtx), 'read', true));
+    });
+
     it('test DA_OPS_IMS_ORG permissions', async () => {
       const opsOrg = 'MyOpsOrg';
       const envOps = {
@@ -500,6 +657,65 @@ describe('DA auth', () => {
       assert(hasPermission({
         users, org: 'test', aclCtx, key: '',
       }, '/some/deep/path', 'write'));
+    });
+
+    it('test DA_OPS_IMS_BOT_EMAIL permissions', async () => {
+      const botEmail = 'da-ops-bot@adobe.com';
+      const envBot = {
+        ...env2,
+        DA_OPS_IMS_BOT_EMAIL: botEmail,
+      };
+
+      // Bot user identified solely by email — no orgs membership at all.
+      // This is the substantive difference from the DA_OPS_IMS_ORG test:
+      // the bearer is matched on email, independent of IMS org membership.
+      const users = [{ email: botEmail, orgs: [] }];
+      const aclCtx = await getAclCtx(envBot, 'test', users, '/', 'config');
+
+      // Should have write permission on CONFIG because of DA_OPS_IMS_BOT_EMAIL injection
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, 'CONFIG', 'write', true));
+
+      // Should have write permission on / because of DA_OPS_IMS_BOT_EMAIL injection
+      // (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/', 'write'));
+
+      // Should have write permission on path because of DA_OPS_IMS_BOT_EMAIL injection
+      // (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/some/deep/path', 'write'));
+
+      // A different email must NOT inherit bot permissions — the rule matches
+      // on the specific email, not on "any user when DA_OPS_IMS_BOT_EMAIL is set".
+      const otherUsers = [{ email: 'not-the-bot@adobe.com', orgs: [] }];
+      const otherCtx = await getAclCtx(envBot, 'test', otherUsers, '/', 'config');
+      assert(!hasPermission({
+        users: otherUsers, org: 'test', aclCtx: otherCtx, key: '',
+      }, '/', 'write'));
+    });
+
+    it('returns empty action set when DA_CONFIG KV GET throws 414 key-too-long error', async () => {
+      // IMS auth redirect fragments (access_token=..., ld_hash=...) leak into the URL path,
+      // producing an org segment >512 bytes. KV rejects the lookup with a 414 error;
+      // without a guard this unhandled exception propagates to a 500 response.
+      const longOrg = 'a'.repeat(513);
+      const kv414Error = new Error(
+        `KV GET failed: 414 UTF-8 encoded length of ${longOrg.length} exceeds key length limit of 512.`,
+      );
+      const failEnv = {
+        DA_CONFIG: {
+          get: () => {
+            throw kv414Error;
+          },
+        },
+      };
+      const users = [{ email: 'user@example.com' }];
+      const aclCtx = await getAclCtx(failEnv, longOrg, users, '/test');
+      assert.strictEqual(aclCtx.actionSet.size, 0, 'oversized org name must produce empty action set, not throw');
     });
   });
 

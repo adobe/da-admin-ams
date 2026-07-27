@@ -1,3 +1,141 @@
+# [1.11.0](https://github.com/adobe/da-admin/compare/v1.10.2...v1.11.0) (2026-06-17)
+
+
+### Features
+
+* add per-site /{site}/CONFIG permission for site config ([#293](https://github.com/adobe/da-admin/issues/293)) ([f9002e9](https://github.com/adobe/da-admin/commit/f9002e931d6666a850ad33aec78de700e992cb84))
+
+## [1.10.2](https://github.com/adobe/da-admin/compare/v1.10.1...v1.10.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* Error when deleting file open in another window ([#259](https://github.com/adobe/da-admin/issues/259)) ([85217c1](https://github.com/adobe/da-admin/commit/85217c1e5b444de6a438cdb7065f741ea5f3f2a7)), closes [#258](https://github.com/adobe/da-admin/issues/258)
+
+## [1.10.1](https://github.com/adobe/da-admin/compare/v1.10.0...v1.10.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* cap putObjectWithVersion retries to prevent runaway workers ([#291](https://github.com/adobe/da-admin/issues/291)) ([fa5dad5](https://github.com/adobe/da-admin/commit/fa5dad560200c52a39c113b7f59117be3ab551f8)), closes [hi#concurrency](https://github.com/hi/issues/concurrency)
+
+# [1.10.0](https://github.com/adobe/da-admin/compare/v1.9.3...v1.10.0) (2026-06-10)
+
+
+### Features
+
+* trigger release ([cc42df6](https://github.com/adobe/da-admin/commit/cc42df6963aef7f85d6ad39e956246c9b66db685))
+
+## [1.9.3](https://github.com/adobe/da-admin/compare/v1.9.2...v1.9.3) (2026-05-29)
+
+
+### Bug Fixes
+
+* **version:** heal ContentType for legacy octet-stream files on labelled version ([#288](https://github.com/adobe/da-admin/issues/288)) ([bf86d40](https://github.com/adobe/da-admin/commit/bf86d4011ef62509d8c7981f502d0b0c74183cc8)), closes [#284](https://github.com/adobe/da-admin/issues/284) [#284](https://github.com/adobe/da-admin/issues/284)
+
+## [1.9.2](https://github.com/adobe/da-admin/compare/v1.9.1...v1.9.2) (2026-05-22)
+
+
+### Bug Fixes
+
+* **version:** log diagnostics on POST /versionsource silent 500 ([#284](https://github.com/adobe/da-admin/issues/284)) ([f06504b](https://github.com/adobe/da-admin/commit/f06504bb1365923dc8d588f60fe9db1d6bfc0b04))
+
+## [1.9.1](https://github.com/adobe/da-admin/compare/v1.9.0...v1.9.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **audit:** grow writeAuditEntry 412 backoff to 6 retries / ~3050 ms ([#282](https://github.com/adobe/da-admin/issues/282)) ([bc49409](https://github.com/adobe/da-admin/commit/bc494095d872f0367a034776e8c8a5e88f284cde)), closes [#277](https://github.com/adobe/da-admin/issues/277)
+
+# [1.9.0](https://github.com/adobe/da-admin/compare/v1.8.2...v1.9.0) (2026-05-20)
+
+
+### Features
+
+* add DA_OPS_IMS_BOT_EMAIL escape hatch for bot write access ([#280](https://github.com/adobe/da-admin/issues/280)) ([faad8c1](https://github.com/adobe/da-admin/commit/faad8c143b0732c83e0e0afb5fbba25b8ef5653c))
+
+## [1.8.2](https://github.com/adobe/da-admin/compare/v1.8.1...v1.8.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **audit:** grow writeAuditEntry 412 backoff to exponential jitter ([#277](https://github.com/adobe/da-admin/issues/277)) ([17aac95](https://github.com/adobe/da-admin/commit/17aac950191d2917cb87e08e11dfaeac4608d561))
+
+## [1.8.1](https://github.com/adobe/da-admin/compare/v1.8.0...v1.8.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* retry on R2 ETag mismatch when client sends If-Match: * ([#276](https://github.com/adobe/da-admin/issues/276)) ([3634d98](https://github.com/adobe/da-admin/commit/3634d98f9b7ff48aab713fa216b0bc77e49f6987))
+
+# [1.8.0](https://github.com/adobe/da-admin/compare/v1.7.3...v1.8.0) (2026-05-07)
+
+
+### Features
+
+* add media route with media bus upload ([#178](https://github.com/adobe/da-admin/issues/178)) ([060765c](https://github.com/adobe/da-admin/commit/060765c73b26ed261341ad5171ead90efa2e5a6f))
+
+## [1.7.3](https://github.com/adobe/da-admin/compare/v1.7.2...v1.7.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **copy:** return 400 instead of 500 when /copy POST body is not form-encoded ([#275](https://github.com/adobe/da-admin/issues/275)) ([a951f0c](https://github.com/adobe/da-admin/commit/a951f0c6ab9ecd0c85bf966fa8bf89f74d5029a2))
+
+## [1.7.2](https://github.com/adobe/da-admin/compare/v1.7.1...v1.7.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* handle NoSuchKey error name in copyFile catch block ([#272](https://github.com/adobe/da-admin/issues/272)) ([939b491](https://github.com/adobe/da-admin/commit/939b49187ac317482406aa946d7b032c5dfa265a))
+* increase writeAuditEntry 412 retries to 5 and remove dead retry loop in put.js ([#274](https://github.com/adobe/da-admin/issues/274)) ([2aca684](https://github.com/adobe/da-admin/commit/2aca684844fff0e8a4f8787f90e2f69a796afbde))
+* return 400 when label is missing in POST /versionsource ([#273](https://github.com/adobe/da-admin/issues/273)) ([36acb2b](https://github.com/adobe/da-admin/commit/36acb2b9f3dffb8c4185da01e7983e79f111d62a))
+
+## [1.7.1](https://github.com/adobe/da-admin/compare/v1.7.0...v1.7.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* handle KV 414 error when IMS auth fragment leaks into org path ([#270](https://github.com/adobe/da-admin/issues/270)) ([db2b4c8](https://github.com/adobe/da-admin/commit/db2b4c8249234eb5c45329629e71bbb7ca1a7efc))
+* treat putVersion 412 as version-already-exists, not failure ([#271](https://github.com/adobe/da-admin/issues/271)) ([e92b916](https://github.com/adobe/da-admin/commit/e92b9166b577caf9ae1ce78c9f96a0927c458d80))
+
+# [1.7.0](https://github.com/adobe/da-admin/compare/v1.6.3...v1.7.0) (2026-04-29)
+
+
+### Features
+
+* add x-error header ([#269](https://github.com/adobe/da-admin/issues/269)) ([9183c18](https://github.com/adobe/da-admin/commit/9183c18e18107079c15bd9d41a44d4f7d30b056b))
+
+## [1.6.3](https://github.com/adobe/da-admin/compare/v1.6.2...v1.6.3) (2026-04-29)
+
+
+### Bug Fixes
+
+* buffer current.body to ArrayBuffer before putVersion to survive SDK retries ([#268](https://github.com/adobe/da-admin/issues/268)) ([47562f1](https://github.com/adobe/da-admin/commit/47562f1f4433269a75f78f14e4d4a52335313898))
+* guard against null body in notifyCollab to prevent move partial_failure ([#267](https://github.com/adobe/da-admin/issues/267)) ([b21c4eb](https://github.com/adobe/da-admin/commit/b21c4ebadafd0a26ff04ad07aff5d5c05b3fe58b))
+
+## [1.6.2](https://github.com/adobe/da-admin/compare/v1.6.1...v1.6.2) (2026-04-29)
+
+
+### Bug Fixes
+
+* consumed body on retry ([#264](https://github.com/adobe/da-admin/issues/264)) ([fffb056](https://github.com/adobe/da-admin/commit/fffb056f63ba064a949c69484d31a3e5c52df6a7))
+* reject expired IMS tokens by comparing expiry in milliseconds ([#265](https://github.com/adobe/da-admin/issues/265)) ([09e44e9](https://github.com/adobe/da-admin/commit/09e44e9debb633f8019e3342977d7a82bc0d991a))
+
+## [1.6.1](https://github.com/adobe/da-admin/compare/v1.6.0...v1.6.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* log errors on move failures so they appear in Cloudflare Logs ([#266](https://github.com/adobe/da-admin/issues/266)) ([84ac28f](https://github.com/adobe/da-admin/commit/84ac28f56bd06fc1d12fbe7899ad0ed96a39190c))
+
+# [1.6.0](https://github.com/adobe/da-admin/compare/v1.5.0...v1.6.0) (2026-04-28)
+
+
+### Features
+
+* no legacy versions support ([#263](https://github.com/adobe/da-admin/issues/263)) ([0d5455c](https://github.com/adobe/da-admin/commit/0d5455cbe8fb4b14677159101df5eb6abaccb4bd))
+
 # [1.5.0](https://github.com/adobe/da-admin/compare/v1.4.0...v1.5.0) (2026-04-27)
 
 
