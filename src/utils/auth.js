@@ -196,22 +196,53 @@ function getIdents(user) {
   return idents.map((ident) => ident?.toLowerCase());
 }
 
+// A page's assets live in a dot-folder next to it (e.g. `foo.html`'s images live under
+// `.foo/`). A recursive grant on `foo` or `foo/**` must also cover `.foo/**` so uploading
+// to a page's asset folder doesn't require a separate ACL entry.
+function dotFolderVariant(prefix) {
+  const trimmed = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  const slashIdx = trimmed.lastIndexOf('/');
+  const lastSegment = trimmed.slice(slashIdx + 1);
+  if (!lastSegment || lastSegment.startsWith('.')) return null;
+  return `${trimmed.slice(0, slashIdx + 1)}.${lastSegment}/`;
+}
+
+// A CONFIG keyword (`CONFIG` or `/{site}/CONFIG`) grants read to anyone with access to the
+// site/org (matched via a wildcard rule below), but write only if a rule targets the keyword
+// itself explicitly. This keeps site content-write grants from implicitly unlocking config writes.
+function isConfigKeyword(target) {
+  return target === 'CONFIG' || target.endsWith('/CONFIG');
+}
+
 export function getUserActions(pathLookup, user, target) {
   const idents = getIdents(user);
+  const isConfigTarget = isConfigKeyword(target);
 
   const plVals = idents.map((key) => pathLookup.get(key) || []);
   const actions = plVals.map((entries) => entries
     .find(({ path }) => {
-      if (path.endsWith('/+**')) return target.startsWith(path.slice(0, -3)) || target === path.slice(0, -4);
+      if (path.endsWith('/+**')) {
+        const prefix = path.slice(0, -3);
+        const dotPrefix = dotFolderVariant(prefix);
+        return target.startsWith(prefix) || target === path.slice(0, -4)
+          || (dotPrefix && target.startsWith(dotPrefix));
+      }
       if (target.length < path.length) return false;
-      if (path.endsWith('/**')) return target.startsWith(path.slice(0, -2));
+      if (path.endsWith('/**')) {
+        const prefix = path.slice(0, -2);
+        const dotPrefix = dotFolderVariant(prefix);
+        return target.startsWith(prefix) || (dotPrefix && target.startsWith(dotPrefix));
+      }
       if (target.endsWith('.html')) return target.slice(0, -5) === path || target === path;
       return target === path;
     }))
     .filter((a) => a);
 
   return {
-    actions: new Set(actions.flatMap(({ actions: acts }) => acts)),
+    actions: new Set(actions.flatMap(({ actions: acts, path }) => {
+      if (isConfigTarget && path !== target) return acts.filter((act) => act === 'read');
+      return acts;
+    })),
     trace: actions,
   };
 }
@@ -229,34 +260,27 @@ export function pathSorter({ path: path1 }, { path: path2 }) {
 }
 
 /**
- * Resolve the keyword path that governs access to a config resource.
- *
- * Org-level config (`/config/{org}`) is always governed by the `CONFIG` keyword.
- * Site-level config (`/config/{org}/{site}/...`) is governed by a per-site
- * `/{site}/CONFIG` keyword, but only when such a rule is actually present in the
- * permissions sheet. When no `/{site}/CONFIG` rule is specified, site config access
- * falls back to the org-level `CONFIG` rule. The `CONFIG` portion is always uppercase
- * so it cannot collide with a content path.
- *
- * @param {Map} pathLookup the parsed permissions, keyed by ident
- * @param {string} [site] the site, if this is a site config request
- * @returns {string} the keyword path governing this config resource
+ * The site of a config request, derived from its key (the path below the org).
+ * For `/config/{org}` the key is empty (org config, no site). For
+ * `/config/{org}/{site}` and `/config/{org}/{site}/...` the site is the first
+ * key segment. Note that `daCtx.site` is unreliable here: for the bare
+ * `/config/{org}/{site}` request the site name is parsed as the filename, leaving
+ * `daCtx.site` undefined, so the key is the source of truth.
  */
-function resolveConfigKey(pathLookup, site) {
-  if (!site) return 'CONFIG';
-  const siteKey = `/${site}/CONFIG`;
-  for (const entries of pathLookup?.values() ?? []) {
-    if (entries.some((entry) => entry.path === siteKey)) return siteKey;
-  }
-  return 'CONFIG';
+function configSite(key) {
+  const [site] = (key || '').split('/').filter((part) => part.length > 0);
+  return site;
 }
 
 /**
- * The keyword path that governs access to the config resource of the given request.
- * @see resolveConfigKey
+ * The keyword path naming the config resource of the given request: the per-site
+ * `/{site}/CONFIG` for site config, or the org-level `CONFIG` for org config. The
+ * `CONFIG` portion is always uppercase so it cannot collide with a content path.
+ * Access is granted via this keyword OR the org `CONFIG` keyword (see the config route).
  */
 export function configPermissionPath(daCtx) {
-  return resolveConfigKey(daCtx.aclCtx?.pathLookup, daCtx.site);
+  const site = configSite(daCtx.key);
+  return site ? `/${site}/CONFIG` : 'CONFIG';
 }
 
 export async function getAclCtx(env, org, users, key, api) {
@@ -359,8 +383,8 @@ export async function getAclCtx(env, org, users, key, api) {
   // Do a lookup for the base key, we always need this info
   let k;
   if (api === 'config') {
-    const [site] = key.split('/').filter((part) => part.length > 0);
-    k = resolveConfigKey(pathLookup, site);
+    const site = configSite(key);
+    k = site ? `/${site}/CONFIG` : 'CONFIG';
   } else {
     k = key.startsWith('/') ? key : `/${key}`;
   }
@@ -377,6 +401,18 @@ export async function getAclCtx(env, org, users, key, api) {
       actionSet = actionSet.intersection(ua.actions);
       ua.trace.forEach((t) => actionTrace.push(t));
     });
+
+    // Site CONFIG access can also come from the org-level CONFIG keyword (see
+    // hasConfigPermission in the config route). Mirror that OR here so the cached
+    // actionSet - exposed to clients via the X-da-actions/X-da-child-actions headers -
+    // matches what the config route actually allows.
+    if (api === 'config' && k !== 'CONFIG') {
+      let orgActionSet = getUserActions(pathLookup, firstUser, 'CONFIG').actions;
+      otherUsers.forEach((u) => {
+        orgActionSet = orgActionSet.intersection(getUserActions(pathLookup, u, 'CONFIG').actions);
+      });
+      actionSet = actionSet.union(orgActionSet);
+    }
   } else {
     actionSet = new Set();
   }
@@ -458,6 +494,37 @@ export function getChildRules(daCtx) {
 
   // eslint-disable-next-line no-param-reassign
   daCtx.aclCtx.childRules = [`${probeDir}**=${[...resultSet].join(',')}`];
+}
+
+/**
+ * Whether the user has `action` on some path at or below `path` (a descendant,
+ * or `path` itself). Used to let a listing of an ancestor folder proceed even
+ * when the user has no permission on the folder itself - e.g. a user granted
+ * read on `/folder2/a/b/c` only should still see `folder2` when listing `/`.
+ * Keyword paths (CONFIG, ACLTRACE) are ignored since they don't represent
+ * content and must not leak directory visibility.
+ */
+export function hasDescendantPermission(daCtx, path, action = 'read') {
+  if (path === null || path === undefined) return false;
+  const { pathLookup } = daCtx.aclCtx;
+  if (pathLookup.size === 0) return true;
+
+  const p = !path.startsWith('/') ? `/${path}` : path;
+  const dirKey = p === '/' ? '/' : `${p.endsWith('/') ? p.slice(0, -1) : p}/`;
+
+  return daCtx.users.every((u) => getIdents(u).some((ident) => (pathLookup.get(ident) || [])
+    .some((r) => {
+      if (!r.path.startsWith('/')) return false;
+      if (r.path === 'CONFIG' || r.path.endsWith('/CONFIG')) return false;
+      if (!r.actions.includes(action)) return false;
+
+      let base = r.path;
+      if (base.endsWith('/+**')) base = base.slice(0, -3);
+      else if (base.endsWith('/**')) base = base.slice(0, -2);
+      else base = base.endsWith('/') ? base : `${base}/`;
+
+      return base.startsWith(dirKey);
+    })));
 }
 
 export function hasPermission(daCtx, path, action, keywordPath = false) {

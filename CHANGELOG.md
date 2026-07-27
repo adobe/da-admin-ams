@@ -1,3 +1,80 @@
+## [1.13.3](https://github.com/adobe/da-admin/compare/v1.13.2...v1.13.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* log R2 errors on source GET 500s ([#307](https://github.com/adobe/da-admin/issues/307)) ([db8f824](https://github.com/adobe/da-admin/commit/db8f8240ff739b35996125195b78e5aa90e396d7))
+
+## [1.13.2](https://github.com/adobe/da-admin/compare/v1.13.1...v1.13.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* site write access must not implicitly grant CONFIG write ([#306](https://github.com/adobe/da-admin/issues/306)) ([9545ea2](https://github.com/adobe/da-admin/commit/9545ea25068afa04d18eb5bcf38dc8a3d6500c4d))
+
+## [1.13.1](https://github.com/adobe/da-admin/compare/v1.13.0...v1.13.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* reject copy/move destinations in the reserved .da-versions folder ([#303](https://github.com/adobe/da-admin/issues/303)) ([df584e5](https://github.com/adobe/da-admin/commit/df584e57d7e794f604677d1f7feda1b9c3a2bc48)), closes [#301](https://github.com/adobe/da-admin/issues/301) [#302](https://github.com/adobe/da-admin/issues/302)
+
+# [1.13.0](https://github.com/adobe/da-admin/compare/v1.12.4...v1.13.0) (2026-07-17)
+
+
+### Features
+
+* reject a non-UUID guid before it becomes a file id ([#304](https://github.com/adobe/da-admin/issues/304)) ([818c553](https://github.com/adobe/da-admin/commit/818c55346d323c9bb636de725ce47df65403c808))
+
+## [1.12.4](https://github.com/adobe/da-admin/compare/v1.12.3...v1.12.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* block .da-versions access through the generic source/list/delete routes ([#302](https://github.com/adobe/da-admin/issues/302)) ([3d74efa](https://github.com/adobe/da-admin/commit/3d74efa9ed0c7680a43895ac086fd9c8f15432f2))
+
+## [1.12.3](https://github.com/adobe/da-admin/compare/v1.12.2...v1.12.3) (2026-07-14)
+
+
+### Bug Fixes
+
+* reject cross-org copy/move destinations instead of misdelivering ([#301](https://github.com/adobe/da-admin/issues/301)) ([fd7a351](https://github.com/adobe/da-admin/commit/fd7a3511faf98e6282a2d2e88b10b2eb3717970f))
+
+## [1.12.2](https://github.com/adobe/da-admin/compare/v1.12.1...v1.12.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* page-scoped ACL grants also cover the page's dot asset folder ([#300](https://github.com/adobe/da-admin/issues/300)) ([0e95a8e](https://github.com/adobe/da-admin/commit/0e95a8e1fb700c5c849a107b9c96b24277ece2ff))
+
+## [1.12.1](https://github.com/adobe/da-admin/compare/v1.12.0...v1.12.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **list:** allow listing an ancestor folder when permission is only granted on a descendant ([#299](https://github.com/adobe/da-admin/issues/299)) ([420f664](https://github.com/adobe/da-admin/commit/420f66454cf00e18b3a4d92c071746ef690082bc))
+
+# [1.12.0](https://github.com/adobe/da-admin/compare/v1.11.2...v1.12.0) (2026-07-07)
+
+
+### Features
+
+* **source:** accept raw body PUT/POST for application/json ([#294](https://github.com/adobe/da-admin/issues/294)) ([6d1363c](https://github.com/adobe/da-admin/commit/6d1363c2c905c04f98f835d881ac8121d5cc4e72))
+
+## [1.11.2](https://github.com/adobe/da-admin/compare/v1.11.1...v1.11.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#236](https://github.com/adobe/da-admin/issues/236)) ([f193fbc](https://github.com/adobe/da-admin/commit/f193fbc4c7ac0252ea443a4e440817401df80fdc))
+
+## [1.11.1](https://github.com/adobe/da-admin/compare/v1.11.0...v1.11.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* derive config site from key and let site wildcards govern site config ([#295](https://github.com/adobe/da-admin/issues/295)) ([fd355f3](https://github.com/adobe/da-admin/commit/fd355f39d47ddbf4773e4f0e7c2e270ab5b49e32))
+
 # [1.11.0](https://github.com/adobe/da-admin/compare/v1.10.2...v1.11.0) (2026-06-17)
 
 

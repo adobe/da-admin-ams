@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { hasReservedSegment } from '../storage/version/paths.js';
+
 const NO_DEST_ERROR = {
   body: JSON.stringify({ error: 'No destination provided.' }),
   status: 400,
@@ -17,6 +19,16 @@ const NO_DEST_ERROR = {
 
 const NO_PARENT_ERROR = {
   body: JSON.stringify({ error: 'Destination cannot be descendent of source.' }),
+  status: 400,
+};
+
+const CROSS_ORG_ERROR = {
+  body: JSON.stringify({ error: 'Destination must be in the same org as the source.' }),
+  status: 400,
+};
+
+const RESERVED_DEST_ERROR = {
+  body: JSON.stringify({ error: 'Invalid or reserved destination.' }),
   status: 400,
 };
 
@@ -28,7 +40,16 @@ export default async function moveHelper(req, daCtx) {
     if (!fullDest) return { error: NO_DEST_ERROR };
     const lower = fullDest.slice(1).toLowerCase();
     const sanitized = lower.endsWith('/') ? lower.slice(0, -1) : lower;
-    let destination = sanitized.split('/').slice(1).join('/');
+
+    // Reject cross-org destinations
+    const [destOrg, ...destParts] = sanitized.split('/');
+    if (destOrg !== daCtx.org) return { error: CROSS_ORG_ERROR };
+
+    let destination = destParts.join('/');
+
+    // Reject destinations inside the reserved .da-versions folder
+    if (hasReservedSegment(destination)) return { error: RESERVED_DEST_ERROR };
+
     const source = daCtx.key;
 
     // Ensure destination is not child of source

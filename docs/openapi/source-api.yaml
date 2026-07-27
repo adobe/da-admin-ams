@@ -24,6 +24,56 @@ source:
         $ref: "./responses.yaml#/404"
       '500':
         $ref: "./responses.yaml#/500"
+  put:
+    operationId: putSource
+    tags:
+      - Source
+    summary: Create or replace source content
+    description: |
+      Create or replace a content **source** within an organization.
+
+      Accepts either a `multipart/form-data` body with the content in the `data` field, or a
+      raw request body for text-based types (`text/html`, `application/json`).
+
+      The `multipart/form-data` body may also include an optional `guid` field. When the target
+      location does not already have a stored identifier, `guid` becomes the document identifier.
+      It must be a UUID. A `guid` that is not a UUID is rejected with a 400 response. When the
+      target already has a stored identifier that differs from `guid`, the request is rejected with
+      a 409 response. When omitted, the service generates a UUID.
+
+      **Important:** For files, the `path` parameter must include the file extension (e.g., `myfile.html`, `data.json`).
+      For folders, omit the extension (e.g., `myfolder`).
+    parameters:
+      - $ref: "./parameters.yaml#/orgParam"
+      - $ref: "./parameters.yaml#/repoParam"
+      - $ref: "./parameters.yaml#/pathParam"
+    requestBody:
+      content:
+        multipart/form-data:
+          schema:
+            $ref: './schemas.yaml#/source'
+          examples:
+            multipart:
+              $ref: "./payloads.yaml#/copySourceForm"
+        text/html:
+          schema:
+            type: string
+            description: Raw HTML content.
+        application/json:
+          schema:
+            type: string
+            description: Raw JSON content.
+    responses:
+      '201':
+        $ref: "./responses.yaml#/201"
+      '400':
+        $ref: "./responses.yaml#/400"
+      '401':
+        $ref: "./responses.yaml#/401"
+      '409':
+        $ref: "./responses.yaml#/409"
+      '500':
+        $ref: "./responses.yaml#/500"
   post:
     operationId: createSource
     tags:
@@ -31,7 +81,16 @@ source:
     summary: Create source content
     description: |
       Create a content **source** within an organization.
-      
+
+      Accepts either a `multipart/form-data` body with the content in the `data` field, or a
+      raw request body for text-based types (`text/html`, `application/json`).
+
+      The `multipart/form-data` body may also include an optional `guid` field. When the target
+      location does not already have a stored identifier, `guid` becomes the document identifier.
+      It must be a UUID. A `guid` that is not a UUID is rejected with a 400 response. When the
+      target already has a stored identifier that differs from `guid`, the request is rejected with
+      a 409 response. When omitted, the service generates a UUID.
+
       **Important:** For files, the `path` parameter must include the file extension (e.g., `myfile.html`, `data.json`).
       For folders, omit the extension (e.g., `myfolder`).
       Examples:
@@ -49,6 +108,14 @@ source:
           examples:
             multipart:
               $ref: "./payloads.yaml#/copySourceForm"
+        text/html:
+          schema:
+            type: string
+            description: Raw HTML content.
+        application/json:
+          schema:
+            type: string
+            description: Raw JSON content.
     responses:
       '201':
         $ref: "./responses.yaml#/201"
@@ -56,6 +123,8 @@ source:
         $ref: "./responses.yaml#/400"
       '401':
         $ref: "./responses.yaml#/401"
+      '409':
+        $ref: "./responses.yaml#/409"
       '500':
         $ref: "./responses.yaml#/500"
   delete:

@@ -23,6 +23,7 @@ import {
   getAclCtx,
   getChildRules,
   getUserActions,
+  hasDescendantPermission,
   hasPermission,
   logout,
   pathSorter,
@@ -532,104 +533,91 @@ describe('DA auth', () => {
       assert(!aclCtx.actionSet.has('write'));
     });
 
-    it('configPermissionPath returns CONFIG for org config', () => {
+    it('configPermissionPath maps a config request to its keyword', () => {
+      // Org config (no site) -> the CONFIG keyword.
       assert.strictEqual(configPermissionPath({}), 'CONFIG');
+      assert.strictEqual(configPermissionPath({ key: '' }), 'CONFIG');
+      // Site config -> /{site}/CONFIG, derived from the key. (daCtx.site is undefined
+      // for the bare /config/{org}/{site} URL, so the key is the source of truth.)
+      assert.strictEqual(configPermissionPath({ key: 'mysite' }), '/mysite/CONFIG');
+      assert.strictEqual(
+        configPermissionPath({ key: 'mysite/public/config.json' }),
+        '/mysite/CONFIG',
+      );
     });
 
-    it('configPermissionPath returns /{site}/CONFIG when a site rule exists', () => {
-      const pathLookup = new Map([
-        ['someone@bloggs.org', [{ path: '/mysite/CONFIG', actions: ['read'] }]],
-      ]);
-      const daCtx = { site: 'mysite', aclCtx: { pathLookup } };
-      assert.strictEqual(configPermissionPath(daCtx), '/mysite/CONFIG');
-    });
-
-    it('configPermissionPath falls back to CONFIG when no site rule exists', () => {
-      const pathLookup = new Map([
-        ['someone@bloggs.org', [{ path: 'CONFIG', actions: ['write'] }]],
-      ]);
-      const daCtx = { site: 'mysite', aclCtx: { pathLookup } };
-      assert.strictEqual(configPermissionPath(daCtx), 'CONFIG');
-    });
-
-    it('test site CONFIG governs site config read when a site rule is specified', async () => {
+    it('site config permission is granted by the site keyword or a site wildcard', async () => {
+      // Building blocks for the union model: the route grants config access if the user
+      // matches the /{site}/CONFIG keyword OR the org CONFIG keyword (see config route).
       const siteConfig = {
         test: {
           ':type': 'sheet',
           ':sheetname': 'permissions',
           data: [
             { path: '/mysite/CONFIG', groups: 'reader@bloggs.org', actions: 'read' },
-            { path: 'CONFIG', groups: 'orgadmin@bloggs.org', actions: 'write' },
+            { path: '/mysite/+**', groups: 'plus@bloggs.org', actions: 'read' },
+            { path: '/mysite/**', groups: 'star@bloggs.org', actions: 'write' },
+            { path: '/mysite/CONFIG', groups: 'admin@bloggs.org', actions: 'write' },
           ],
         },
       };
       const siteEnv = { DA_CONFIG: { get: (name) => siteConfig[name] } };
 
-      // Build a site-config daCtx for the given users.
-      const ctxFor = async (users, site) => {
-        const aclCtx = await getAclCtx(siteEnv, 'test', users, `${site}/config.json`, 'config');
+      // A bare /config/{org}/{site} request: key is the site, daCtx.site absent.
+      const ctxFor = async (users) => {
+        const aclCtx = await getAclCtx(siteEnv, 'test', users, 'mysite', 'config');
         return {
-          users, org: 'test', aclCtx, key: `${site}/config.json`, site,
+          users, org: 'test', aclCtx, key: 'mysite',
         };
       };
+      const siteKey = '/mysite/CONFIG';
 
-      const reader = [{ email: 'reader@bloggs.org' }];
-      const readerCtx = await ctxFor(reader, 'mysite');
+      // An explicit /mysite/CONFIG read rule grants read but not write.
+      const reader = await ctxFor([{ email: 'reader@bloggs.org' }]);
+      assert(hasPermission(reader, siteKey, 'read', true));
+      assert(!hasPermission(reader, siteKey, 'write', true));
 
-      // The index.js gate always allows reaching the config route for config requests.
-      assert(readerCtx.aclCtx.actionSet.has('read'));
+      // A /mysite/+** read wildcard matches the site keyword.
+      const plus = await ctxFor([{ email: 'plus@bloggs.org' }]);
+      assert(hasPermission(plus, siteKey, 'read', true));
+      assert(!hasPermission(plus, siteKey, 'write', true));
 
-      // A /mysite/CONFIG rule exists, so the site keyword governs this site's config.
-      assert.strictEqual(configPermissionPath(readerCtx), '/mysite/CONFIG');
+      // A /mysite/** write wildcard grants read but NOT write on the site keyword: site
+      // write access must not implicitly unlock config write, only an explicit CONFIG
+      // rule can grant that.
+      const star = await ctxFor([{ email: 'star@bloggs.org' }]);
+      assert(hasPermission(star, siteKey, 'read', true));
+      assert(!hasPermission(star, siteKey, 'write', true));
 
-      // The reader can read this site's config.
-      assert(hasPermission(readerCtx, configPermissionPath(readerCtx), 'read', true));
-      // ...but cannot write it.
-      assert(!hasPermission(readerCtx, configPermissionPath(readerCtx), 'write', true));
-
-      // An org-CONFIG holder without /mysite/CONFIG cannot read this site's config,
-      // because a /mysite/CONFIG rule is specified (no fallback to the CONFIG rule).
-      const orgAdmin = [{ email: 'orgadmin@bloggs.org' }];
-      const orgAdminCtx = await ctxFor(orgAdmin, 'mysite');
-      assert.strictEqual(configPermissionPath(orgAdminCtx), '/mysite/CONFIG');
-      assert(!hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'read', true));
+      // An explicit `write` rule on /mysite/CONFIG itself still grants write.
+      const admin = await ctxFor([{ email: 'admin@bloggs.org' }]);
+      assert(hasPermission(admin, siteKey, 'read', true));
+      assert(hasPermission(admin, siteKey, 'write', true));
     });
 
-    it('test site config falls back to CONFIG rule when no site rule is specified', async () => {
-      const siteConfig = {
+    it('getAclCtx actionSet for a config request includes org CONFIG fallback actions', async () => {
+      // Regression test: the cached actionSet built by getAclCtx() for api === 'config'
+      // used to only look up the site-specific /{site}/CONFIG keyword, never the
+      // org-level CONFIG keyword. Since this actionSet is what gets exposed to clients
+      // via the X-da-actions/X-da-child-actions headers (see daResp.js), a user who only
+      // holds the org-level CONFIG rule would pass the real write check in postConfig
+      // (hasConfigPermission ORs both keywords) but the header would still say
+      // read-only, permanently locking the config editor UI once the doc exists.
+      const orgOnlyConfig = {
         test: {
           ':type': 'sheet',
           ':sheetname': 'permissions',
           data: [
-            // Note: no /othersite/CONFIG rule is specified anywhere.
             { path: 'CONFIG', groups: 'orgadmin@bloggs.org', actions: 'write' },
-            { path: '/mysite/CONFIG', groups: 'reader@bloggs.org', actions: 'read' },
           ],
         },
       };
-      const siteEnv = { DA_CONFIG: { get: (name) => siteConfig[name] } };
+      const orgOnlyEnv = { DA_CONFIG: { get: (name) => orgOnlyConfig[name] } };
+      const users = [{ email: 'orgadmin@bloggs.org' }];
 
-      const ctxFor = async (users, site) => {
-        const aclCtx = await getAclCtx(siteEnv, 'test', users, `${site}/config.json`, 'config');
-        return {
-          users, org: 'test', aclCtx, key: `${site}/config.json`, site,
-        };
-      };
-
-      // No /othersite/CONFIG rule -> falls back to the org-level CONFIG rule.
-      const orgAdmin = [{ email: 'orgadmin@bloggs.org' }];
-      const orgAdminCtx = await ctxFor(orgAdmin, 'othersite');
-      assert.strictEqual(configPermissionPath(orgAdminCtx), 'CONFIG');
-      // The CONFIG rule grants orgAdmin write (and therefore read) on this site's config.
-      assert(hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'read', true));
-      assert(hasPermission(orgAdminCtx, configPermissionPath(orgAdminCtx), 'write', true));
-
-      // A user with only /mysite/CONFIG does not inherit access to othersite via the
-      // fallback, since the fallback follows the CONFIG rule which they do not hold.
-      const reader = [{ email: 'reader@bloggs.org' }];
-      const readerCtx = await ctxFor(reader, 'othersite');
-      assert.strictEqual(configPermissionPath(readerCtx), 'CONFIG');
-      assert(!hasPermission(readerCtx, configPermissionPath(readerCtx), 'read', true));
+      const aclCtx = await getAclCtx(orgOnlyEnv, 'test', users, 'mysite', 'config');
+      assert(aclCtx.actionSet.has('read'));
+      assert(aclCtx.actionSet.has('write'));
     });
 
     it('test DA_OPS_IMS_ORG permissions', async () => {
@@ -1110,6 +1098,35 @@ describe('DA auth', () => {
     );
   });
 
+  it('page-scoped grant also covers the page\'s dot asset folder', () => {
+    const patharr = [
+      {
+        path: '/westernsydney/learning-futures/+**',
+        actions: ['write'],
+      },
+      {
+        path: '/westernsydney/learning-futures.html',
+        actions: ['write'],
+      },
+    ];
+    const pathlookup = new Map();
+    pathlookup.set('joe@acme.com', patharr);
+
+    const user = {
+      email: 'joe@acme.com',
+      ident: 'AAAA@bbb.e',
+    };
+
+    assert.deepStrictEqual(
+      ['write'],
+      [...getUserActions(pathlookup, user, '/westernsydney/learning-futures.html').actions],
+    );
+    assert.deepStrictEqual(
+      ['write'],
+      [...getUserActions(pathlookup, user, '/westernsydney/.learning-futures/Parramatta.jpg').actions],
+    );
+  });
+
   it('test logout', async () => {
     const deleteCalled = [];
     const deleteFunc = async (id) => {
@@ -1241,5 +1258,131 @@ describe('DA auth', () => {
     const rules = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules.length);
     assert(rules[0] === '/foo/**=read,write' || rules[0] === '/foo/**=write,read');
+  });
+
+  describe('hasDescendantPermission (ancestor listing)', async () => {
+    const DA_CONFIG = {
+      test: {
+        ':type': 'multi-sheet',
+        permissions: {
+          data: [
+            // Only a deep exact page is granted - the reported customer bug.
+            { path: '/folder2/a/b/c', groups: 'deep@bloggs.org', actions: 'read' },
+            // A folder granted via a recursive-descendants-only wildcard.
+            { path: '/folder/**', groups: 'wild@bloggs.org', actions: 'read' },
+            // A folder granted via +** (folder itself and descendants), write-only
+            // (write implies read).
+            { path: '/team/proj/+**', groups: 'plus@bloggs.org', actions: 'write' },
+            // A user with both a wildcard folder and a deep exact page - should
+            // reveal both "folder" and "folder2" when listing "/".
+            { path: '/folder/**', groups: 'both@bloggs.org', actions: 'read' },
+            { path: '/folder2/a/b/c', groups: 'both@bloggs.org', actions: 'read' },
+            // A user who shares one path with another co-author (AND semantics).
+            { path: '/shared/**', groups: 'sharedA@bloggs.org', actions: 'read' },
+            { path: '/shared/**', groups: 'sharedB@bloggs.org', actions: 'read' },
+            // Unrelated grants that must not leak directory visibility.
+            { path: '/other/x', groups: 'other@bloggs.org', actions: 'write' },
+            { path: 'CONFIG', groups: 'cfgonly@bloggs.org', actions: 'write' },
+            { path: '/site/CONFIG', groups: 'sitecfg@bloggs.org', actions: 'write' },
+          ],
+        },
+      },
+    };
+    const env = { DA_CONFIG: { get: (name) => DA_CONFIG[name] } };
+
+    async function aclCtxFor(...emails) {
+      const users = emails.map((email) => ({ email }));
+      const aclCtx = await getAclCtx(env, 'test', users, '/irrelevant');
+      return { users, aclCtx };
+    }
+
+    it('returns false for a null or undefined path', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      assert(!hasDescendantPermission({ users, aclCtx }, null, 'read'));
+      assert(!hasDescendantPermission({ users, aclCtx }, undefined, 'read'));
+    });
+
+    it('returns true for every ancestor of a deep exact grant, and the exact path itself', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a/b', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a/b/c', 'read'));
+      assert(hasDescendantPermission(ctx, 'folder2', 'read'), 'should normalize missing leading slash');
+    });
+
+    it('returns false beyond the exact grant and for unrelated siblings', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      // An exact (non-wildcard) grant does not cover its own children.
+      assert(!hasDescendantPermission(ctx, '/folder2/a/b/c/d', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder3', 'read'));
+      // Prefix-collision guard: "/team" must not match "/teamx".
+      assert(!hasDescendantPermission(ctx, '/foo', 'read'));
+    });
+
+    it('respects the action being checked', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder2', 'write'));
+    });
+
+    it('returns true when the deepest grant is via a recursive wildcard', async () => {
+      const { users, aclCtx } = await aclCtxFor('wild@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folderx', 'read'), 'prefix-collision guard');
+    });
+
+    it('returns true for ancestors of a +** grant', async () => {
+      const { users, aclCtx } = await aclCtxFor('plus@bloggs.org');
+      const ctx = { users, aclCtx };
+      // "/team" and "/team/proj" are ancestors of the granted root and need
+      // this fallback to be listable. "/team/proj/sub" is already directly
+      // covered by hasPermission's forward +** match, so it's out of scope
+      // for this ancestor-only helper (hasPermission is checked first by
+      // callers and would already return true there).
+      assert(hasDescendantPermission(ctx, '/team', 'read'));
+      assert(hasDescendantPermission(ctx, '/team/proj', 'read'));
+      assert(!hasDescendantPermission(ctx, '/teamx', 'read'), 'prefix-collision guard');
+    });
+
+    it('reveals every distinct top-level folder that leads to a grant for the same user', async () => {
+      const { users, aclCtx } = await aclCtxFor('both@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder3', 'read'));
+    });
+
+    it('requires every co-author to have descendant permission (AND semantics)', async () => {
+      const both = await aclCtxFor('sharedA@bloggs.org', 'sharedB@bloggs.org');
+      assert(hasDescendantPermission(both, '/shared', 'read'));
+
+      const mixed = await aclCtxFor('deep@bloggs.org', 'other@bloggs.org');
+      assert(!hasDescendantPermission(mixed, '/folder2', 'read'), 'other@bloggs.org has no grant there');
+    });
+
+    it('does not leak directory visibility from CONFIG-only grants', async () => {
+      const cfgOnly = await aclCtxFor('cfgonly@bloggs.org');
+      assert(!hasDescendantPermission(cfgOnly, '/', 'read'));
+
+      const siteCfg = await aclCtxFor('sitecfg@bloggs.org');
+      assert(!hasDescendantPermission(siteCfg, '/', 'read'));
+      assert(!hasDescendantPermission(siteCfg, '/site', 'read'));
+    });
+
+    it('returns true unconditionally when there is no ACL config at all', async () => {
+      const openEnv = { DA_CONFIG: { get: () => undefined } };
+      const users = [{ email: 'anyone@bloggs.org' }];
+      const aclCtx = await getAclCtx(openEnv, 'test', users, '/irrelevant');
+      assert(hasDescendantPermission({ users, aclCtx }, '/', 'read'));
+      assert(hasDescendantPermission({ users, aclCtx }, '/anything/at/all', 'read'));
+    });
   });
 });

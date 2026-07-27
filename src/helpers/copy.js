@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { hasReservedSegment } from '../storage/version/paths.js';
+
 const NO_DEST_ERROR = {
   body: JSON.stringify({ error: 'No destination provided.' }),
   status: 400,
@@ -16,6 +18,16 @@ const NO_DEST_ERROR = {
 
 const BAD_CONTENT_TYPE_ERROR = {
   body: JSON.stringify({ error: 'Invalid Content-Type. Expected multipart/form-data or application/x-www-form-urlencoded.' }),
+  status: 400,
+};
+
+const CROSS_ORG_ERROR = {
+  body: JSON.stringify({ error: 'Destination must be in the same org as the source.' }),
+  status: 400,
+};
+
+const RESERVED_DEST_ERROR = {
+  body: JSON.stringify({ error: 'Invalid or reserved destination.' }),
   status: 400,
 };
 
@@ -32,7 +44,16 @@ export default async function copyHelper(req, daCtx) {
   const continuationToken = formData.get('continuation-token');
   const lower = fullDest.slice(1).toLowerCase();
   const sanitized = lower.endsWith('/') ? lower.slice(0, -1) : lower;
-  const destination = sanitized.split('/').slice(1).join('/');
+
+  // Reject cross-org destinations
+  const [destOrg, ...destParts] = sanitized.split('/');
+  if (destOrg !== daCtx.org) return { error: CROSS_ORG_ERROR };
+
+  const destination = destParts.join('/');
+
+  // Reject destinations inside the reserved .da-versions folder
+  if (hasReservedSegment(destination)) return { error: RESERVED_DEST_ERROR };
+
   const source = daCtx.key;
   return { source, destination, continuationToken };
 }

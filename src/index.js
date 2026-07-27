@@ -39,15 +39,28 @@ export default {
       return daResp({ status: 500, error: e.message });
     }
 
-    const { users, authorized, key } = daCtx;
+    const {
+      users, authorized, key, api,
+    } = daCtx;
 
     // Anonymous users are not permitted
     const anon = users.some((user) => user.email === 'anonymous');
     if (anon) return daResp({ status: 401 });
 
-    if (!authorized) return daResp({ status: 403 });
+    // `authorized` only reflects permission on the exact requested path. A user
+    // granted permission on some deeper descendant only (e.g. /folder2/a/b/c)
+    // is not "authorized" for a listing of an ancestor folder by that measure,
+    // but should still be able to list it to reach their descendant. The list
+    // route itself knows how to fall back to descendant permission, so this
+    // blanket gate must not shadow it.
+    if (!authorized && api !== 'list') return daResp({ status: 403 });
 
-    if (key?.startsWith('.da-versions')) {
+    // `key` is org-stripped (daCtx.key), so version storage appears as the
+    // segment `{repo}/.da-versions/...`, not a leading `.da-versions`. Block the
+    // reserved folder anywhere in the path so the generic source/list/delete
+    // routes cannot read, list, write, or delete raw version and audit objects,
+    // which must only be reached via the ACL-aware versionsource/versionlist routes.
+    if (key?.split('/').includes('.da-versions')) {
       return daResp({ status: 404 });
     }
 

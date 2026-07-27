@@ -292,6 +292,99 @@ export default (ctx) => describe('Integration Tests: it tests', function () {
     assert.ok([200, 201].includes(resp.status), `Expected 200 or 201, got ${resp.status} - user: ${superUser.email}`);
   });
 
+  it('[super user] cannot list the reserved .da-versions folder via the generic list route', async () => {
+    // Version bodies and audit logs live at '{repo}/.da-versions/{fileId}/...'.
+    // Creating the pages above wrote audit entries there, so without the router
+    // guard this list returns 200 with those entries; only /versionlist may reach
+    // them. The guard must make the generic list route 404 instead.
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const resp = await fetch(`${serverUrl}/list/${org}/${repo}/.da-versions`, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 404, `Expected 404 from the router guard, got ${resp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] cannot read or write a .da-versions object via the generic source route', async () => {
+    // Without the guard this POST forges an audit/version object under
+    // .da-versions and the GET reads it back. The guard must 404 both.
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const url = `${serverUrl}/source/${org}/${repo}/.da-versions/forge-test/leak.html`;
+    const formData = new FormData();
+    const blob = new Blob(['<html><body>forged</body></html>'], { type: 'text/html' });
+    formData.append('data', new File([blob], 'leak.html', { type: 'text/html' }));
+    const putResp = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(putResp.status, 404, `Expected 404 from the router guard on write, got ${putResp.status} - user: ${superUser.email}`);
+    const getResp = await fetch(url, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(getResp.status, 404, `Expected 404 from the router guard on read, got ${getResp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] source PUT rejects a guid that contains a .da-versions segment', async () => {
+    // The guid becomes the document file id and keys the reserved
+    // .da-versions/{id}/... space. A guid with path separators or a .da-versions
+    // segment must not be accepted, or it would steer the write outside that space.
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const url = `${serverUrl}/source/${org}/${repo}/guid-craft-seg.html`;
+    const formData = new FormData();
+    const blob = new Blob(['<html><body>craft</body></html>'], { type: 'text/html' });
+    formData.append('data', new File([blob], 'guid-craft-seg.html', { type: 'text/html' }));
+    formData.append('guid', 'x/.da-versions/forged');
+    const resp = await fetch(url, {
+      method: 'PUT',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 for a crafted guid, got ${resp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] source PUT rejects a non-UUID guid', async () => {
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const url = `${serverUrl}/source/${org}/${repo}/guid-craft-plain.html`;
+    const formData = new FormData();
+    const blob = new Blob(['<html><body>craft</body></html>'], { type: 'text/html' });
+    formData.append('data', new File([blob], 'guid-craft-plain.html', { type: 'text/html' }));
+    formData.append('guid', 'not-a-uuid');
+    const resp = await fetch(url, {
+      method: 'PUT',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 for a non-UUID guid, got ${resp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] source PUT accepts a valid UUID guid and stores it as the file id', async () => {
+    // A well formed guid is the supported contract and must still work.
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const validGuid = 'a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d';
+    const url = `${serverUrl}/source/${org}/${repo}/guid-valid.html`;
+    const formData = new FormData();
+    const blob = new Blob(['<html><body>valid</body></html>'], { type: 'text/html' });
+    formData.append('data', new File([blob], 'guid-valid.html', { type: 'text/html' }));
+    formData.append('guid', validGuid);
+    const resp = await fetch(url, {
+      method: 'PUT',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.ok([200, 201].includes(resp.status), `Expected 200 or 201 for a valid guid, got ${resp.status} - user: ${superUser.email}`);
+    assert.strictEqual(resp.headers.get('x-da-id'), validGuid, `Expected the stored file id to match the guid - user: ${superUser.email}`);
+  });
+
   it('[limited user] cannot read page1', async () => {
     const {
       serverUrl, org, repo, limitedUser,
@@ -449,6 +542,113 @@ export default (ctx) => describe('Integration Tests: it tests', function () {
     const fileNames = body.map((item) => item.name);
     assert.ok(fileNames.includes('page1'), 'Should list page1');
     assert.ok(fileNames.includes('page2'), 'Should list page2');
+  });
+
+  it('[super user] should copy a page within the org', async () => {
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const formData = new FormData();
+    formData.append('destination', `/${org}/${repo}/test-folder/page1-copy.html`);
+
+    let resp = await fetch(`${serverUrl}/copy/${org}/${repo}/test-folder/page1.html`, {
+      method: 'POST',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 204, `Expected 204 No Content, got ${resp.status} - user: ${superUser.email}`);
+
+    // validate the copy exists
+    resp = await fetch(`${serverUrl}/source/${org}/${repo}/test-folder/page1-copy.html`, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 200, `Expected 200 OK, got ${resp.status} - user: ${superUser.email}`);
+    const body = await resp.text();
+    assert.strictEqual(body, '<html><body><h1>Page 1</h1></body></html>');
+  });
+
+  it('[super user] cannot copy a page to another org', async () => {
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const formData = new FormData();
+    formData.append('destination', `/other-${org}/${repo}/test-folder/page1-xorg.html`);
+
+    let resp = await fetch(`${serverUrl}/copy/${org}/${repo}/test-folder/page1.html`, {
+      method: 'POST',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 Bad Request, got ${resp.status} - user: ${superUser.email}`);
+    const body = await resp.json();
+    assert.match(body.error, /same org/i, `Expected cross-org error, got ${body.error}`);
+
+    // validate no phantom copy was re-anchored into the source org
+    resp = await fetch(`${serverUrl}/source/${org}/${repo}/test-folder/page1-xorg.html`, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 404, `Expected 404 Not Found, got ${resp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] cannot move a page to another org', async () => {
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+    const formData = new FormData();
+    formData.append('destination', `/other-${org}/${repo}/test-folder/page1-moved.html`);
+
+    let resp = await fetch(`${serverUrl}/move/${org}/${repo}/test-folder/page1-copy.html`, {
+      method: 'POST',
+      body: formData,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 Bad Request, got ${resp.status} - user: ${superUser.email}`);
+    const body = await resp.json();
+    assert.match(body.error, /same org/i, `Expected cross-org error, got ${body.error}`);
+
+    // validate the source was not touched
+    resp = await fetch(`${serverUrl}/source/${org}/${repo}/test-folder/page1-copy.html`, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 200, `Expected 200 OK, got ${resp.status} - user: ${superUser.email}`);
+  });
+
+  it('[super user] cannot copy or move into the reserved .da-versions folder', async () => {
+    // The generic copy/move routes take their destination from the request body.
+    // A destination inside {repo}/.da-versions/... lands in version and audit
+    // storage and forges a document's history. The destination guard must reject
+    // it with 400, whatever the caller's grants.
+    const {
+      serverUrl, org, repo, superUser,
+    } = ctx;
+
+    const copyForm = new FormData();
+    copyForm.append('destination', `/${org}/${repo}/.da-versions/forge-target/audit-9999999999.txt`);
+    let resp = await fetch(`${serverUrl}/copy/${org}/${repo}/test-folder/page1.html`, {
+      method: 'POST',
+      body: copyForm,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 from the destination guard on copy, got ${resp.status} - user: ${superUser.email}`);
+    let body = await resp.json();
+    assert.match(body.error, /invalid or reserved/i, `Expected reserved-destination error, got ${body.error}`);
+
+    const moveForm = new FormData();
+    moveForm.append('destination', `/${org}/${repo}/.da-versions/forge-target/0000.html`);
+    resp = await fetch(`${serverUrl}/move/${org}/${repo}/test-folder/page1-copy.html`, {
+      method: 'POST',
+      body: moveForm,
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 400, `Expected 400 from the destination guard on move, got ${resp.status} - user: ${superUser.email}`);
+    body = await resp.json();
+    assert.match(body.error, /invalid or reserved/i, `Expected reserved-destination error, got ${body.error}`);
+
+    // the blocked move must leave the source in place
+    resp = await fetch(`${serverUrl}/source/${org}/${repo}/test-folder/page1-copy.html`, {
+      headers: { Authorization: `Bearer ${superUser.accessToken}` },
+    });
+    assert.strictEqual(resp.status, 200, `Expected 200 OK, got ${resp.status} - user: ${superUser.email}`);
   });
 
   it('[anonymous] cannot delete an object', async () => {
