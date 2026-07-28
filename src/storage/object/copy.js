@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -16,16 +16,25 @@ import {
 
 import getObject from './get.js';
 import getS3Config from '../utils/config.js';
-import { invalidateCollab } from '../utils/object.js';
+import { notifyCollab } from '../utils/object.js';
 import { putObjectWithVersion } from '../version/put.js';
 import { getUsersForMetadata } from '../utils/version.js';
 import { listCommand } from '../utils/list.js';
 import { hasPermission } from '../../utils/auth.js';
+import { hasReservedSegment } from '../version/paths.js';
 
 const MAX_KEYS = 900;
 
 export const copyFile = async (config, env, daCtx, sourceKey, details, isRename) => {
-  const Key = `${sourceKey.replace(details.source, details.destination)}`;
+  const Key = sourceKey.replace(details.source, details.destination);
+
+  // A folder copy derives many keys from one request. Reject any that lands in
+  // the reserved .da-versions folder, whatever the caller's grants and whatever
+  // the source looks like. Version storage is only reachable through the
+  // ACL-aware version routes, so no copy or move may write into it.
+  if (hasReservedSegment(Key)) {
+    return { $metadata: { httpStatusCode: 400 } };
+  }
 
   if (!hasPermission(daCtx, sourceKey, 'read') || !hasPermission(daCtx, Key, 'write')) {
     return {
@@ -41,10 +50,15 @@ export const copyFile = async (config, env, daCtx, sourceKey, details, isRename)
     key: sourceKey,
   }, true);
 
+  // Skip if source doesn't exist (e.g., it's a folder without an actual object)
+  if (source?.status === 404) {
+    return { $metadata: { httpStatusCode: 404 } };
+  }
+
   const input = {
     Bucket: daCtx.bucket,
     Key: `${daCtx.org}/${Key}`,
-    CopySource: `${daCtx.bucket}/${daCtx.org}/${sourceKey}`,
+    CopySource: `${daCtx.bucket}/${daCtx.org}/${encodeURI(sourceKey)}`,
     ContentType: source?.contentType || 'application/octet-stream',
   };
 
@@ -89,11 +103,15 @@ export const copyFile = async (config, env, daCtx, sourceKey, details, isRename)
           env,
           { bucket: daCtx.bucket, org: daCtx.org, key: sourceKey },
         );
+        // Buffer the ReadableStream so the body survives retries inside putObjectWithVersion.
+        const originalBody = original.body instanceof ReadableStream
+          ? await new Response(original.body).arrayBuffer()
+          : original.body;
         return /* await */ putObjectWithVersion(env, daCtx, {
           bucket: daCtx.bucket,
           org: daCtx.org,
           key: Key,
-          body: original.body,
+          body: originalBody,
           contentLength: original.contentLength,
           type: original.contentType,
         });
@@ -106,14 +124,14 @@ export const copyFile = async (config, env, daCtx, sourceKey, details, isRename)
       const client = new S3Client(config);
       // This is a move so copy to the new location
       return /* await */ client.send(new CopyObjectCommand(input));
-    } else if (e.$metadata?.httpStatusCode === 404) {
-      return { $metadata: e.$metadata };
+    } else if (e.$metadata?.httpStatusCode === 404 || e.name === 'NoSuchKey') {
+      return { $metadata: { httpStatusCode: 404 } };
     }
     throw e;
   } finally {
     if (Key.endsWith('.html')) {
       // Reset the collab cached state for the copied object
-      await invalidateCollab('syncAdmin', `${daCtx.origin}/source/${daCtx.org}/${Key}`, env);
+      await notifyCollab('syncadmin', `${daCtx.origin}/source/${daCtx.org}/${Key}`, env);
     }
   }
 };
@@ -139,6 +157,7 @@ export default async function copyObject(env, daCtx, details, isRename) {
       if (resp.continuationToken) {
         continuationToken = `copy-${daCtx.org}-${details.source}-${details.destination}-${crypto.randomUUID()}`;
         while (resp.continuationToken) {
+          // eslint-disable-next-line no-await-in-loop
           resp = await listCommand(daCtx, { continuationToken: resp.continuationToken }, client);
           remainingKeys.push(...resp.sourceKeys);
         }

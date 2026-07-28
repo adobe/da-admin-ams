@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -15,6 +15,7 @@ import { postVersionSource } from '../routes/version.js';
 import copyHandler from '../routes/copy.js';
 import logout from '../routes/logout.js';
 import moveRoute from '../routes/move.js';
+import postMedia from '../routes/media.js';
 
 export default async function postHandler({ req, env, daCtx }) {
   const { path } = daCtx;
@@ -25,6 +26,7 @@ export default async function postHandler({ req, env, daCtx }) {
   if (path.startsWith('/copy')) return copyHandler({ req, env, daCtx });
   if (path.startsWith('/move')) return moveRoute({ req, env, daCtx });
   if (path.startsWith('/logout')) return logout({ env, daCtx });
+  if (path.startsWith('/media')) return postMedia({ req, env, daCtx });
 
   return undefined;
 }

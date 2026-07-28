@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -9,7 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { FORM_TYPES } from '../utils/constants.js';
+import { FORM_TYPES, SUPPORTED_TYPES, MEDIA_TYPES } from '../utils/constants.js';
+import normalizeCharset from '../utils/charset.js';
 
 /**
  * Builds a source response
@@ -60,12 +61,37 @@ async function formPutHandler(req) {
   return formData ? getFormEntries(formData) : null;
 }
 
-export default async function putHelper(req, env, daCtx) {
-  const contentType = req.headers.get('content-type')?.split(';')[0];
+async function rawBodyPutHandler(req, contentType) {
+  if (typeof req.text !== 'function') return null;
+  const body = await req.text();
+  if (!body) return null;
 
-  if (!contentType) return null;
+  const normalized = normalizeCharset(contentType);
+  const data = new File([body], 'source', { type: normalized });
+  return { data };
+}
+
+export async function putHelper(req, env, daCtx) {
+  const rawContentType = req.headers.get('content-type');
+  if (!rawContentType) return null;
+
+  const contentType = rawContentType.split(';')[0].trim();
 
   if (FORM_TYPES.some((type) => type === contentType)) return formPutHandler(req, env, daCtx);
 
+  if (SUPPORTED_TYPES.includes(contentType) && !MEDIA_TYPES.includes(contentType)) {
+    return rawBodyPutHandler(req, contentType);
+  }
+
   return undefined;
+}
+
+export async function getFileBody(data) {
+  await data.text();
+  return { body: data, type: normalizeCharset(data.type) };
+}
+
+export function getObjectBody(data) {
+  // TODO: This will not correctly handle HTML as data
+  return { body: JSON.stringify(data), type: 'application/json' };
 }

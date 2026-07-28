@@ -9,14 +9,16 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import assert from 'assert';
+import assert from 'node:assert';
 import esmock from 'esmock';
 
 describe('Copy Route', () => {
   it('Test copyHandler with permissions', async () => {
     const copyCalled = [];
     const copyObject = (e, c, d, m) => {
-      copyCalled.push({e, c, d, m});
+      copyCalled.push({
+        e, c, d, m,
+      });
       return { status: 200 };
     };
 
@@ -28,46 +30,212 @@ describe('Copy Route', () => {
         return false;
       }
       return true;
-    }
-    const copyHandler = await esmock(
-      '../../src/routes/copy.js', {
-        '../../src/storage/object/copy.js': {
-          default: copyObject
-        },
-        '../../src/utils/auth.js': {
-          hasPermission        }
-      }
-    );
+    };
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission },
+    });
 
     const formdata = new Map();
-    formdata.set('destination', '/myorg/MY/dest.html')
+    formdata.set('destination', '/myorg/MY/dest.html');
     const req = {
-      formData: () => formdata
+      formData: () => formdata,
     };
 
-    const resp = await copyHandler({ req, env: {}, daCtx: { key: 'my/src.html' }});
+    const resp = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/src.html' } });
     assert.strictEqual(403, resp.status);
     assert.strictEqual(copyCalled.length, 0);
 
-    const resp2 = await copyHandler({ req, env: {}, daCtx: { key: 'my/src2.html' }});
+    const resp2 = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/src2.html' } });
     assert.strictEqual(403, resp2.status);
     assert.strictEqual(copyCalled.length, 0);
 
     const formdata2 = new Map();
-    formdata2.set('destination', '/myorg/MY/dest2.html')
+    formdata2.set('destination', '/myorg/MY/dest2.html');
     const req2 = {
-      formData: () => formdata2
+      formData: () => formdata2,
     };
 
-    const resp3 = await copyHandler({ req: req2, env: {}, daCtx: { key: 'my/src.html' }});
+    const resp3 = await copyHandler({ req: req2, env: {}, daCtx: { org: 'myorg', key: 'my/src.html' } });
     assert.strictEqual(403, resp3.status);
     assert.strictEqual(copyCalled.length, 0);
 
-    const resp4 = await copyHandler({ req: req2, env: {}, daCtx: { key: 'my/src2.html' }});
+    const resp4 = await copyHandler({ req: req2, env: {}, daCtx: { org: 'myorg', key: 'my/src2.html' } });
     assert.strictEqual(200, resp4.status);
     assert.strictEqual(copyCalled.length, 1);
     assert.strictEqual('my/src2.html', copyCalled[0].d.source);
     assert.strictEqual('my/dest2.html', copyCalled[0].d.destination);
     assert.strictEqual(false, copyCalled[0].m);
+  });
+
+  it('Test copyHandler returns 400 when request body is not form-encoded', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const req = {
+      formData: () => {
+        throw new TypeError('Unrecognized Content-Type header value. FormData can only parse the following MIME types: multipart/form-data, application/x-www-form-urlencoded');
+      },
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { key: 'my/src.html' } });
+    assert.strictEqual(resp.status, 400);
+    assert.strictEqual(copyCalled.length, 0);
+    const body = JSON.parse(resp.body);
+    assert.match(body.error, /Content-Type/i);
+  });
+
+  it('Test copyHandler returns 400 when destination org differs from request org', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const formdata = new Map();
+    formdata.set('destination', '/otherorg/my/dest.html');
+    const req = {
+      formData: () => formdata,
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/src.html' } });
+    assert.strictEqual(resp.status, 400);
+    assert.strictEqual(copyCalled.length, 0);
+    const body = JSON.parse(resp.body);
+    assert.match(body.error, /same org/i);
+  });
+
+  it('Test copyHandler accepts a same-org destination regardless of case', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const formdata = new Map();
+    formdata.set('destination', '/MyOrg/my/dest.html');
+    const req = {
+      formData: () => formdata,
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/src.html' } });
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(copyCalled.length, 1);
+    assert.strictEqual(copyCalled[0].d.destination, 'my/dest.html');
+  });
+
+  it('Test copyHandler - no destination provided', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const formdata = new Map();
+    const req = {
+      formData: () => formdata,
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { key: 'my/src.html' } });
+    assert.strictEqual(400, resp.status);
+    assert.strictEqual(copyCalled.length, 0);
+  });
+
+  it('Test copyHandler returns 400 when destination is in the reserved .da-versions folder', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const formdata = new Map();
+    formdata.set('destination', '/myorg/my/.da-versions/1234/audit-9999999999.txt');
+    const req = {
+      formData: () => formdata,
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/decoy.html' } });
+    assert.strictEqual(resp.status, 400);
+    assert.strictEqual(copyCalled.length, 0);
+    const body = JSON.parse(resp.body);
+    assert.match(body.error, /invalid or reserved/i);
+  });
+
+  it('Test copyHandler allows a destination segment that merely contains da-versions', async () => {
+    const copyCalled = [];
+    const copyObject = (e, c, d, m) => {
+      copyCalled.push({
+        e, c, d, m,
+      });
+      return { status: 200 };
+    };
+
+    const copyHandler = await esmock('../../src/routes/copy.js', {
+      '../../src/storage/object/copy.js': {
+        default: copyObject,
+      },
+      '../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const formdata = new Map();
+    formdata.set('destination', '/myorg/my/my-da-versions-notes.html');
+    const req = {
+      formData: () => formdata,
+    };
+
+    const resp = await copyHandler({ req, env: {}, daCtx: { org: 'myorg', key: 'my/src.html' } });
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(copyCalled.length, 1);
+    assert.strictEqual(copyCalled[0].d.destination, 'my/my-da-versions-notes.html');
   });
 });

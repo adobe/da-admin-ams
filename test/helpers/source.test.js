@@ -1,10 +1,22 @@
-import assert from 'assert';
-import putHelper from '../../src/helpers/source.js';
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+import assert from 'node:assert';
+import { putHelper } from '../../src/helpers/source.js';
 
 import env from '../utils/mocks/env.js';
+
 const daCtx = { org: 'cq', key: 'geometrixx/hello.html', propsKey: 'geometrixx/hello.html.props' };
 
-const MOCK_URL = 'https://da.live/source/cq/geometrixx/hello';
+const MOCK_URL = `https://${env.DA_DOMAIN}/source/cq/geometrixx/hello`;
 
 describe('Source helper', () => {
   describe('Put success', async () => {
@@ -18,7 +30,7 @@ describe('Source helper', () => {
     it('Returns null if unsupported content type', async () => {
       const opts = {
         headers: new Headers({
-          'Content-Type': `custom/form; boundary`,
+          'Content-Type': 'custom/form; boundary',
         }),
       };
 
@@ -33,7 +45,7 @@ describe('Source helper', () => {
         body: {},
         method: 'PUT',
         headers: new Headers({
-          'Content-Type': `multipart/form-data; boundary`,
+          'Content-Type': 'multipart/form-data; boundary',
         }),
       };
 
@@ -50,7 +62,7 @@ describe('Source helper', () => {
         body,
         method: 'PUT',
         headers: new Headers({
-          'Content-Type': `application/x-www-form-urlencoded; boundary`,
+          'Content-Type': 'application/x-www-form-urlencoded; boundary',
         }),
       };
 
@@ -71,6 +83,100 @@ describe('Source helper', () => {
       const helped = await putHelper(req, env, daCtx);
       assert.strictEqual('foo', helped.data);
       assert.strictEqual('12345', helped.guid);
+    });
+  });
+
+  describe('Raw body PUT', async () => {
+    it('Handles text/html raw body', async () => {
+      const html = '<body><p>Café résumé</p></body>';
+      const opts = {
+        body: html,
+        method: 'PUT',
+        headers: new Headers({
+          'Content-Type': 'text/html',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert(helped.data instanceof File);
+      assert.strictEqual(helped.data.type, 'text/html; charset=utf-8');
+      const text = await helped.data.text();
+      assert(text.includes('Café'));
+    });
+
+    it('Returns undefined for text/plain raw body', async () => {
+      const opts = {
+        body: 'Hello — world™',
+        method: 'PUT',
+        headers: new Headers({
+          'Content-Type': 'text/plain',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert.strictEqual(helped, undefined);
+    });
+
+    it('Handles application/json raw body', async () => {
+      const json = JSON.stringify({ title: 'Café' });
+      const opts = {
+        body: json,
+        method: 'PUT',
+        headers: new Headers({
+          'Content-Type': 'application/json',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert(helped.data instanceof File);
+      assert.strictEqual(helped.data.type, 'application/json');
+      const text = await helped.data.text();
+      assert.strictEqual(text, json);
+    });
+
+    it('Handles text/html with existing charset', async () => {
+      const html = '<body><p>Test</p></body>';
+      const opts = {
+        body: html,
+        method: 'PUT',
+        headers: new Headers({
+          'Content-Type': 'text/html; charset=utf-8',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert(helped.data instanceof File);
+      assert.strictEqual(helped.data.type, 'text/html; charset=utf-8');
+    });
+
+    it('Returns null for empty raw body', async () => {
+      const opts = {
+        body: '',
+        method: 'PUT',
+        headers: new Headers({
+          'Content-Type': 'text/html',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert.strictEqual(helped, null);
+    });
+
+    it('Still returns undefined for unsupported types', async () => {
+      const opts = {
+        headers: new Headers({
+          'Content-Type': 'image/png',
+        }),
+      };
+
+      const req = new Request(MOCK_URL, opts);
+      const helped = await putHelper(req, env, daCtx);
+      assert.strictEqual(helped, undefined);
     });
   });
 });

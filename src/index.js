@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -16,19 +16,53 @@ import headHandler from './handlers/head.js';
 import getHandler from './handlers/get.js';
 import postHandler from './handlers/post.js';
 import deleteHandler from './handlers/delete.js';
-import unknownHandler from './handlers/unknown.js';
 
 export default {
+  /**
+   * @param {Request} req
+   * @param {Env} env
+   * @returns {Promise<Response>}
+   */
   async fetch(req, env) {
-    if (req.method === 'OPTIONS') return daResp({ status: 204 });
-
-    const daCtx = await getDaCtx(req, env);
-    const { authorized, key } = daCtx;
-    if (!authorized) {
-      const status = daCtx.users[0].email === 'anonymous' ? 401 : 403;
-      return daResp({ status });
+    if (req.method === 'OPTIONS') {
+      return daResp({ status: 204 });
     }
-    if (key?.startsWith('.da-versions')) return daResp({ status: 404 });
+
+    let daCtx;
+    try {
+      daCtx = await getDaCtx(req, env);
+    } catch (e) {
+      if (e.message === 'Invalid path') {
+        return daResp({ status: 400 });
+      }
+      console.error('Error computing context', e);
+      return daResp({ status: 500, error: e.message });
+    }
+
+    const {
+      users, authorized, key, api,
+    } = daCtx;
+
+    // Anonymous users are not permitted
+    const anon = users.some((user) => user.email === 'anonymous');
+    if (anon) return daResp({ status: 401 });
+
+    // `authorized` only reflects permission on the exact requested path. A user
+    // granted permission on some deeper descendant only (e.g. /folder2/a/b/c)
+    // is not "authorized" for a listing of an ancestor folder by that measure,
+    // but should still be able to list it to reach their descendant. The list
+    // route itself knows how to fall back to descendant permission, so this
+    // blanket gate must not shadow it.
+    if (!authorized && api !== 'list') return daResp({ status: 403 });
+
+    // `key` is org-stripped (daCtx.key), so version storage appears as the
+    // segment `{repo}/.da-versions/...`, not a leading `.da-versions`. Block the
+    // reserved folder anywhere in the path so the generic source/list/delete
+    // routes cannot read, list, write, or delete raw version and audit objects,
+    // which must only be reached via the ACL-aware versionsource/versionlist routes.
+    if (key?.split('/').includes('.da-versions')) {
+      return daResp({ status: 404 });
+    }
 
     let respObj;
     switch (req.method) {
@@ -48,7 +82,7 @@ export default {
         respObj = await deleteHandler({ req, env, daCtx });
         break;
       default:
-        respObj = unknownHandler();
+        respObj = { status: 405 };
     }
 
     if (!respObj) return daResp({ status: 404 });

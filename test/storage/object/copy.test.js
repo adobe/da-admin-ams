@@ -1,14 +1,15 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
- * This file is licensed to you under the Apache License, Version 2.0 (the 'License');
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed under
- * the License is distributed on an 'AS IS' BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+/* eslint-disable no-unused-vars,consistent-return,max-classes-per-file */
 import assert from 'node:assert';
 import esmock from 'esmock';
 import { CopyObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
@@ -42,18 +43,19 @@ describe('Object copy', () => {
   it('returns 403 when copying to a location without write permission', async () => {
     const pathLookup = new Map();
     pathLookup.set('aaa@bbb.ccc', [
-      {path: '/source/mysrc', actions: ['read']},
-      {path: '/source/mydst', actions: ['read']}
+      { path: '/source/mysrc', actions: ['read'] },
+      { path: '/source/mydst', actions: ['read'] },
     ]);
 
-    const aclCtx = { pathLookup, actionSet: new Set(['read'])};
-    const ctx = { aclCtx, key: 'source/mysrc', users: [{email: 'aaa@bbb.ccc'}] };
+    const aclCtx = { pathLookup, actionSet: new Set(['read']) };
+    const ctx = { aclCtx, key: 'source/mysrc', users: [{ email: 'aaa@bbb.ccc' }] };
 
     const details = {
       source: 'mysrc',
       destination: 'mydst',
     };
 
+    // eslint-disable-next-line no-shadow
     const { copyFile } = await import('../../../src/storage/object/copy.js');
     const resp = await copyFile({}, {}, ctx, '/source/mysrc', details, false);
     assert.strictEqual(resp.$metadata.httpStatusCode, 403);
@@ -87,15 +89,100 @@ describe('Object copy', () => {
     assert.strictEqual(resp.$metadata.httpStatusCode, 403);
   });
 
+  it('returns 400 without sending a copy when the destination Key is in the reserved .da-versions folder', async () => {
+    const s3Sent = [];
+    const mockS3Client = class {
+      // eslint-disable-next-line class-methods-use-this
+      send(command) {
+        s3Sent.push(command);
+        return { $metadata: { httpStatusCode: 200 } };
+      }
+
+      middlewareStack = { add: () => {} };
+    };
+
+    const mockGetObject = async () => ({ contentType: 'text/html', status: 200 });
+
+    // eslint-disable-next-line no-shadow
+    const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+      '@aws-sdk/client-s3': {
+        S3Client: mockS3Client,
+      },
+      '../../../src/storage/object/get.js': {
+        default: mockGetObject,
+      },
+      '../../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
+    const daCtx = {
+      bucket: 'root-bucket',
+      org: 'myorg',
+      origin: 'https://test.com',
+      users: [{ email: 'test@example.com' }],
+    };
+    const details = { source: 'mysrc', destination: 'my/.da-versions/1234' };
+
+    const resp = await copyFile({}, env, daCtx, 'mysrc/audit-9999999999.txt', details, false);
+    assert.strictEqual(resp.$metadata.httpStatusCode, 400);
+    assert.strictEqual(s3Sent.length, 0);
+  });
+
+  it('blocks a .da-versions destination even when the source is already under .da-versions', async () => {
+    // No source-side exemption. A repo-level copy or move must not relocate a
+    // .da-versions object into another .da-versions location. Otherwise an
+    // attacker who gets crafted content into any .da-versions (through a separate
+    // write hole) could plant it in a victim's version history. The guard rejects
+    // the reserved destination whatever the source looks like.
+    const s3Sent = [];
+    const mockS3Client = class {
+      // eslint-disable-next-line class-methods-use-this
+      send(command) {
+        s3Sent.push(command);
+        return { $metadata: { httpStatusCode: 200 } };
+      }
+
+      middlewareStack = { add: () => {} };
+    };
+
+    const mockGetObject = async () => ({ contentType: 'text/html', status: 200 });
+
+    // eslint-disable-next-line no-shadow
+    const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+      '@aws-sdk/client-s3': {
+        S3Client: mockS3Client,
+      },
+      '../../../src/storage/object/get.js': {
+        default: mockGetObject,
+      },
+      '../../../src/utils/auth.js': { hasPermission: () => true },
+    });
+
+    const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
+    const daCtx = {
+      bucket: 'root-bucket',
+      org: 'myorg',
+      origin: 'https://test.com',
+      users: [{ email: 'test@example.com' }],
+    };
+    const details = { source: 'oldrepo', destination: 'newrepo' };
+
+    const resp = await copyFile({}, env, daCtx, 'oldrepo/.da-versions/fid1/v1.html', details, true);
+    assert.strictEqual(resp.$metadata.httpStatusCode, 400);
+    assert.strictEqual(s3Sent.length, 0);
+  });
+
   it('Copy to location with permission', async () => {
     const pathLookup = new Map();
     pathLookup.set('aaa@bbb.ccc', [
-      {path: '/source/mysrc', actions: ['read']},
-      {path: '/source/mydst', actions: ['read', 'write']}
+      { path: '/source/mysrc', actions: ['read'] },
+      { path: '/source/mydst', actions: ['read', 'write'] },
     ]);
 
-    const aclCtx = { pathLookup, actionSet: new Set(['read'])};
-    const ctx = { aclCtx, bucket: 'root-bucket', key: 'source/mysrc', org: 'org', users: [{email: 'aaa@bbb.ccc'}] };
+    const aclCtx = { pathLookup, actionSet: new Set(['read']) };
+    const ctx = {
+      aclCtx, bucket: 'root-bucket', key: 'source/mysrc', org: 'org', users: [{ email: 'aaa@bbb.ccc' }],
+    };
 
     const details = {
       source: 'mysrc',
@@ -103,16 +190,17 @@ describe('Object copy', () => {
     };
 
     const mockS3Client = class {
+      // eslint-disable-next-line class-methods-use-this
       send(command) {
         return {
           command,
           $metadata: { httpStatusCode: 200 },
         };
       }
+
       middlewareStack = {
         add: (a, b) => {},
       };
-  
     };
 
     const mockGetObject = async (env, { bucket, org, key }, head) => {
@@ -125,20 +213,19 @@ describe('Object copy', () => {
       }
     };
 
-    const { copyFile } = await esmock(
-      '../../../src/storage/object/copy.js', {
-        '@aws-sdk/client-s3': {
-          S3Client: mockS3Client
-        },
-        '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-      }
-    )
+    // eslint-disable-next-line no-shadow
+    const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+      '@aws-sdk/client-s3': {
+        S3Client: mockS3Client,
+      },
+      '../../../src/storage/object/get.js': {
+        default: mockGetObject,
+      },
+    });
 
     const resp = await copyFile({}, {}, ctx, 'source/mysrc', details, true);
     assert.strictEqual(resp.$metadata.httpStatusCode, 200);
-    const input = resp.command.input;
+    const { input } = resp.command;
     assert.strictEqual(input.Bucket, 'root-bucket');
     assert.strictEqual(input.CopySource, 'root-bucket/org/source/mysrc');
     assert.strictEqual(input.Key, 'org/source/mydst');
@@ -151,7 +238,7 @@ describe('Object copy', () => {
       s3Mock.on(ListObjectsV2Command).resolves({ Contents: [{ Key: 'mydir/xyz.html' }] });
 
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
@@ -179,8 +266,8 @@ describe('Object copy', () => {
       const dacollab = {
         fetch: (url) => {
           collabcalls.push(url);
-        }
-      }
+        },
+      };
       const env = { dacollab };
       const ctx = {
         bucket: 'root-bucket',
@@ -196,13 +283,11 @@ describe('Object copy', () => {
         destination: 'mydir/newdir',
       };
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       await copyObjectWithMock.default(env, ctx, details, false);
 
@@ -218,22 +303,24 @@ describe('Object copy', () => {
       assert.strictEqual(input.ContentType, 'text/html');
 
       const md = input.Metadata;
-      assert(md.ID, "ID should be set");
-      assert(md.Version, "Version should be set");
+      assert(md.ID, 'ID should be set');
+      assert(md.Version, 'Version should be set');
       assert.strictEqual(typeof (md.Timestamp), 'string', 'Timestamp should be set as a string');
       assert.strictEqual(md.Users, '[{"email":"haha@foo.com"}]');
       assert.strictEqual(md.Path, 'mydir/newdir/xyz.html');
 
       assert.strictEqual(1, collabcalls.length);
-      assert.deepStrictEqual(collabcalls,
-        ['https://localhost/api/v1/syncAdmin?doc=somehost.sometld/source/foo/mydir/newdir/xyz.html']);
+      assert.deepStrictEqual(
+        collabcalls,
+        ['https://localhost/api/v1/syncadmin?doc=somehost.sometld/source/foo/mydir/newdir/xyz.html'],
+      );
     });
 
     it('Copies a file for rename', async () => {
       s3Mock.on(ListObjectsV2Command).resolves({ Contents: [{ Key: 'mydir/dir1/myfile.html' }] });
 
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
@@ -261,23 +348,23 @@ describe('Object copy', () => {
       const dacollab = {
         fetch: (url) => {
           collabcalls.push(url);
-        }
-      }
+        },
+      };
       const env = { dacollab };
-      const ctx = { bucket: 'root-bucket', org: 'testorg', key: 'mydir/dir1', origin: 'http://localhost:3000' };
+      const ctx = {
+        bucket: 'root-bucket', org: 'testorg', key: 'mydir/dir1', origin: 'http://localhost:3000',
+      };
       ctx.aclCtx = await getAclCtx(env, ctx.org, ctx.users, '/');
       const details = {
         source: 'mydir/dir1',
         destination: 'mydir/dir2',
       };
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       await copyObjectWithMock.default(env, ctx, details, true);
 
@@ -293,16 +380,20 @@ describe('Object copy', () => {
       assert.strictEqual(input.ContentType, 'text/html');
       assert.ifError(input.Metadata);
 
-      assert.deepStrictEqual(collabcalls,
-        ['https://localhost/api/v1/syncAdmin?doc=http://localhost:3000/source/testorg/mydir/dir2/myfile.html']);
+      assert.deepStrictEqual(
+        collabcalls,
+        ['https://localhost/api/v1/syncadmin?doc=http://localhost:3000/source/testorg/mydir/dir2/myfile.html'],
+      );
     });
 
     it('Adds copy condition', async () => {
       const msAdded = [];
       const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
         send(command) {
           return command;
         }
+
         middlewareStack = {
           add: (a, b) => {
             msAdded.push(a);
@@ -322,28 +413,30 @@ describe('Object copy', () => {
         return null;
       };
 
-      const { copyFile } = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '@aws-sdk/client-s3': {
-            S3Client: mockS3Client
-          },
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      )
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
+        },
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const collabCalled = [];
       const env = {
         dacollab: {
-          fetch: (x) => { collabCalled.push(x); },
+          fetch: (x) => {
+            collabCalled.push(x);
+            return { body: { cancel: () => {} } };
+          },
         },
       };
       const daCtx = {
         bucket: 'root-bucket',
         org: 'myorg',
         origin: 'https://blahblah:7890',
-        users: [{email: 'joe@bloggs.org', otherstuff: 'blah'}],
+        users: [{ email: 'joe@bloggs.org', otherstuff: 'blah' }],
       };
       daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
       const details = {
@@ -383,11 +476,137 @@ describe('Object copy', () => {
 
       assert.strictEqual(nxtCalled.length, 1);
       assert.strictEqual(nxtCalled[0].request.foo, 'bar');
-      assert.deepStrictEqual(nxtCalled[0].request.headers,
-        { aaa: 'bbb', 'cf-copy-destination-if-none-match': '*' });
+      assert.deepStrictEqual(
+        nxtCalled[0].request.headers,
+        { aaa: 'bbb', 'cf-copy-destination-if-none-match': '*' },
+      );
 
-      assert.deepStrictEqual(collabCalled,
-        ['https://localhost/api/v1/syncAdmin?doc=https://blahblah:7890/source/myorg/mydst/abc/def.html']);
+      assert.deepStrictEqual(
+        collabCalled,
+        ['https://localhost/api/v1/syncadmin?doc=https://blahblah:7890/source/myorg/mydst/abc/def.html'],
+      );
+    });
+
+    it('Skips copying when source does not exist (folder without object)', async () => {
+      const mockS3Client = class {
+        middlewareStack = {
+          add: () => {},
+        };
+      };
+
+      // Mock getObject to return 404 for a folder that doesn't exist as an object
+      const mockGetObject = async (env, { bucket, org, key }, head) => {
+        if (head && bucket === 'root-bucket' && org === 'myorg' && key === 'mysrc/virtual-folder') {
+          return {
+            status: 404,
+          };
+        }
+        return null;
+      };
+
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
+        },
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
+
+      const env = {
+        dacollab: {
+          fetch: () => {},
+        },
+      };
+      const daCtx = {
+        bucket: 'root-bucket',
+        org: 'myorg',
+        origin: 'https://test.com',
+        users: [{ email: 'test@example.com' }],
+      };
+      daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
+      const details = {
+        source: 'mysrc',
+        destination: 'mydst',
+      };
+
+      const resp = await copyFile({}, env, daCtx, 'mysrc/virtual-folder', details, false);
+      assert.strictEqual(resp.$metadata.httpStatusCode, 404);
+    });
+
+    it('Copies files with special characters in names', async () => {
+      const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
+        send(command) {
+          return command;
+        }
+
+        middlewareStack = {
+          add: () => {},
+        };
+      };
+
+      // Mock getObject to return content type for HEAD requests
+      const mockGetObject = async (env, { bucket, org, key }, head) => {
+        if (head && bucket === 'root-bucket' && org === 'myorg') {
+          if (key === 'mysrc/icon=gift-box, style=two-toned.svg'
+            || key === 'mysrc/boost saver_img1.jpg'
+            || key === 'mysrc/file%20with%20encoded.png') {
+            return {
+              contentType: 'image/svg+xml',
+              status: 200,
+            };
+          }
+        }
+        return null;
+      };
+
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
+        },
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
+
+      const env = {
+        dacollab: {
+          fetch: () => {},
+        },
+      };
+      const daCtx = {
+        bucket: 'root-bucket',
+        org: 'myorg',
+        origin: 'https://test.com',
+        users: [{ email: 'test@example.com' }],
+      };
+      daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
+      const details = {
+        source: 'mysrc',
+        destination: 'mydst',
+      };
+
+      // Test file with commas, equals signs, and spaces
+      const resp1 = await copyFile({}, env, daCtx, 'mysrc/icon=gift-box, style=two-toned.svg', details, false);
+      assert.strictEqual(resp1.constructor.name, 'CopyObjectCommand');
+      assert.strictEqual(resp1.input.CopySource, 'root-bucket/myorg/mysrc/icon=gift-box,%20style=two-toned.svg');
+      assert.strictEqual(resp1.input.Key, 'myorg/mydst/icon=gift-box, style=two-toned.svg');
+
+      // Test file with spaces
+      const resp2 = await copyFile({}, env, daCtx, 'mysrc/boost saver_img1.jpg', details, false);
+      assert.strictEqual(resp2.constructor.name, 'CopyObjectCommand');
+      assert.strictEqual(resp2.input.CopySource, 'root-bucket/myorg/mysrc/boost%20saver_img1.jpg');
+      assert.strictEqual(resp2.input.Key, 'myorg/mydst/boost saver_img1.jpg');
+
+      // Test file with already-encoded characters
+      const resp3 = await copyFile({}, env, daCtx, 'mysrc/file%20with%20encoded.png', details, false);
+      assert.strictEqual(resp3.constructor.name, 'CopyObjectCommand');
+      // The %20 should be double-encoded to %2520
+      assert.strictEqual(resp3.input.CopySource, 'root-bucket/myorg/mysrc/file%2520with%2520encoded.png');
+      assert.strictEqual(resp3.input.Key, 'myorg/mydst/file%20with%20encoded.png');
     });
 
     it('Copy content when destination already exists', async () => {
@@ -396,9 +615,11 @@ describe('Object copy', () => {
       };
 
       const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
         send() {
           throw error;
         }
+
         middlewareStack = { add: () => {} };
       };
       const mockGetObject = async (e, u, h) => {
@@ -409,33 +630,35 @@ describe('Object copy', () => {
             body: 'original body',
             contentLength: 42,
             contentType: 'text/html',
-          }
+          };
         }
       };
-      const puwv = []
+      const puwv = [];
       const mockPutObjectWithVersion = async (e, c, u) => {
-        puwv.push({e, c, u});
+        puwv.push({ e, c, u });
         return 'beuaaark!';
       };
 
-      const { copyFile } = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-          '../../../src/storage/version/put.js': {
-            putObjectWithVersion: mockPutObjectWithVersion,
-          },
-          '@aws-sdk/client-s3': {
-            S3Client: mockS3Client,
-          },
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
         },
-      );
+        '../../../src/storage/version/put.js': {
+          putObjectWithVersion: mockPutObjectWithVersion,
+        },
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
+        },
+      });
 
       const collabCalled = [];
       const env = {
         dacollab: {
-          fetch: (x) => { collabCalled.push(x); },
+          fetch: (x) => {
+            collabCalled.push(x);
+            return { body: { cancel: () => {} } };
+          },
         },
       };
       const daCtx = { bucket: 'mybucket', org: 'xorg' };
@@ -458,15 +681,159 @@ describe('Object copy', () => {
       assert.strictEqual(puwv[0].u.type, 'text/html');
     });
 
+    it('buffers ReadableStream body to ArrayBuffer before calling putObjectWithVersion (stream must survive retry)', async () => {
+      // Regression test for: ReadableStream disturbed on putObjectWithVersion retry.
+      // copyFile fetches original.body (a ReadableStream) and passes it to
+      // putObjectWithVersion. If the main PUT fails with 412 and retries, the stream
+      // is already consumed in the Cloudflare runtime ("disturbed") and the retry
+      // returns 500. The fix buffers the stream to ArrayBuffer before the call so
+      // the body can survive retries.
+      const error = { $metadata: { httpStatusCode: 412 } };
+
+      const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
+        send() { throw error; }
+
+        middlewareStack = { add: () => {} };
+      };
+
+      const mockGetObject = async (e, u, h) => {
+        if (u.key === 'xsrc/abc/def.html' && !h) {
+          return {
+            body: ReadableStream.from([new TextEncoder().encode('original body')]),
+            contentLength: 13,
+            contentType: 'text/html',
+          };
+        }
+      };
+
+      const puwv = [];
+      const mockPutObjectWithVersion = async (e, c, u) => {
+        puwv.push({ e, c, u });
+        return { status: 200 };
+      };
+
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/version/put.js': { putObjectWithVersion: mockPutObjectWithVersion },
+        '@aws-sdk/client-s3': { S3Client: mockS3Client },
+      });
+
+      const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
+      const daCtx = { bucket: 'mybucket', org: 'xorg' };
+      daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
+      const details = { source: 'xsrc', destination: 'xdst' };
+
+      await copyFile({}, env, daCtx, 'xsrc/abc/def.html', details, false);
+
+      assert.strictEqual(puwv.length, 1);
+      // The body must be an ArrayBuffer so it survives retries inside putObjectWithVersion.
+      // A ReadableStream here means the stream was not buffered and would be disturbed on retry.
+      assert(puwv[0].u.body instanceof ArrayBuffer, 'body must be buffered to ArrayBuffer before putObjectWithVersion');
+      assert.strictEqual(puwv[0].u.contentLength, 13);
+    });
+
+    it('passes non-ReadableStream body through unchanged to putObjectWithVersion', async () => {
+      const error = { $metadata: { httpStatusCode: 412 } };
+
+      const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
+        send() { throw error; }
+
+        middlewareStack = { add: () => {} };
+      };
+
+      const preBuffered = new TextEncoder().encode('pre-buffered').buffer;
+      const mockGetObject = async (e, u, h) => {
+        if (u.key === 'xsrc/abc/def.html' && !h) {
+          return {
+            body: preBuffered,
+            contentLength: preBuffered.byteLength,
+            contentType: 'text/html',
+          };
+        }
+      };
+
+      const puwv = [];
+      const mockPutObjectWithVersion = async (e, c, u) => {
+        puwv.push({ e, c, u });
+        return { status: 200 };
+      };
+
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': { default: mockGetObject },
+        '../../../src/storage/version/put.js': { putObjectWithVersion: mockPutObjectWithVersion },
+        '@aws-sdk/client-s3': { S3Client: mockS3Client },
+      });
+
+      const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
+      const daCtx = { bucket: 'mybucket', org: 'xorg' };
+      daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
+      const details = { source: 'xsrc', destination: 'xdst' };
+
+      await copyFile({}, env, daCtx, 'xsrc/abc/def.html', details, false);
+
+      assert.strictEqual(puwv.length, 1);
+      assert.strictEqual(puwv[0].u.body, preBuffered, 'non-ReadableStream body must be passed through unchanged');
+    });
+
+    it('returns 404 when CopyObjectCommand throws NoSuchKey with no $metadata.httpStatusCode', async () => {
+      const error = new Error('The specified key does not exist.');
+      error.name = 'NoSuchKey';
+
+      const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
+        send() {
+          throw error;
+        }
+
+        middlewareStack = { add: () => {} };
+      };
+
+      const mockGetObject = async (env, { bucket, org, key }, head) => {
+        if (head && bucket === 'test-bucket' && org === 'testorg' && key === 'src/missing.html') {
+          return { contentType: 'text/html', status: 200, contentLength: 0 };
+        }
+        return null;
+      };
+
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
+        },
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
+
+      const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
+      const daCtx = {
+        bucket: 'test-bucket',
+        org: 'testorg',
+        origin: 'https://test.com',
+        users: [{ email: 'test@example.com' }],
+      };
+      daCtx.aclCtx = await getAclCtx(env, daCtx.org, daCtx.users, '/');
+      const details = { source: 'src', destination: 'dst' };
+
+      const resp = await copyFile({}, env, daCtx, 'src/missing.html', details, true);
+      assert.deepStrictEqual(resp, { $metadata: { httpStatusCode: 404 } });
+    });
+
     it('Copy content when origin does not exists', async () => {
       const error = {
         $metadata: { httpStatusCode: 404, hi: 'ha' },
       };
 
       const mockS3Client = class {
+        // eslint-disable-next-line class-methods-use-this
         send() {
           throw error;
         }
+
         middlewareStack = { add: () => {} };
       };
 
@@ -482,21 +849,23 @@ describe('Object copy', () => {
         return null;
       };
 
-      const { copyFile } = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '@aws-sdk/client-s3': {
-            S3Client: mockS3Client,
-          },
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
+      // eslint-disable-next-line no-shadow
+      const { copyFile } = await esmock('../../../src/storage/object/copy.js', {
+        '@aws-sdk/client-s3': {
+          S3Client: mockS3Client,
         },
-      );
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const collabCalled = [];
       const env = {
         dacollab: {
-          fetch: (x) => { collabCalled.push(x); },
+          fetch: (x) => {
+            collabCalled.push(x);
+            return { body: { cancel: () => {} } };
+          },
         },
       };
       const daCtx = { bucket: 'test-bucket', org: 'qqqorg', origin: 'http://qqq' };
@@ -507,8 +876,10 @@ describe('Object copy', () => {
       };
       const resp = await copyFile({}, env, daCtx, 'qqqsrc/abc/def.html', details, false);
       assert.strictEqual(resp.$metadata.httpStatusCode, 404);
-      assert.deepStrictEqual(collabCalled,
-        ['https://localhost/api/v1/syncAdmin?doc=http://qqq/source/qqqorg/qqqdst/abc/def.html']);
+      assert.deepStrictEqual(
+        collabCalled,
+        ['https://localhost/api/v1/syncadmin?doc=http://qqq/source/qqqorg/qqqdst/abc/def.html'],
+      );
     });
   });
 
@@ -519,31 +890,31 @@ describe('Object copy', () => {
       });
 
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
-    // Mock getObject to return content type for HEAD requests
-    const mockGetObject = async (env, { bucket, org, key }, head) => {
-      if (head && bucket === 'root-bucket' && org === 'foo') {
-        if (key === 'mydir/xyz.html') {
-          return {
-            contentType: 'text/html',
-            status: 200,
-            contentLength: 100,
-          };
-        } else if (key === 'mydir' || key === 'mydir.props') {
-          return {
-            contentType: 'text/html',
-            status: 200,
-            contentLength: 100,
-          };
+      // Mock getObject to return content type for HEAD requests
+      const mockGetObject = async (env, { bucket, org, key }, head) => {
+        if (head && bucket === 'root-bucket' && org === 'foo') {
+          if (key === 'mydir/xyz.html') {
+            return {
+              contentType: 'text/html',
+              status: 200,
+              contentLength: 100,
+            };
+          } else if (key === 'mydir' || key === 'mydir.props') {
+            return {
+              contentType: 'text/html',
+              status: 200,
+              contentLength: 100,
+            };
+          }
         }
-      }
-      return null;
-    };
+        return null;
+      };
 
-      const env = { dacollab: { fetch: () => {} } };
+      const env = { dacollab: { fetch: () => ({ body: { cancel: () => {} } }) } };
       const ctx = {
         bucket: 'root-bucket',
         org: 'foo',
@@ -556,13 +927,11 @@ describe('Object copy', () => {
         destination: 'mydir/newdir',
       };
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const resp = await copyObjectWithMock.default(env, ctx, details, false);
       assert.strictEqual(resp.status, 204);
@@ -576,10 +945,10 @@ describe('Object copy', () => {
         DA_JOBS: {
           put(key, value) {
             DA_JOBS[key] = value;
-          }
+          },
         },
-        dacollab: { fetch: () => {} }
-      }
+        dacollab: { fetch: () => ({ body: { cancel: () => {} } }) },
+      };
       s3Mock.on(ListObjectsV2Command)
         .resolves({
           Contents: [{ Key: 'mydir/xyz.html' }],
@@ -592,6 +961,7 @@ describe('Object copy', () => {
         });
 
       // Mock getObject to return content type for HEAD requests
+      // eslint-disable-next-line no-shadow
       const mockGetObject = async (env, { bucket, org, key }, head) => {
         if (head && bucket === 'root-bucket' && org === 'foo') {
           if (key === 'mydir/xyz.html' || key === 'mydir/abc.html') {
@@ -612,7 +982,7 @@ describe('Object copy', () => {
       };
 
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
@@ -628,13 +998,11 @@ describe('Object copy', () => {
         destination: 'mydir/newdir',
       };
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const resp = await copyObjectWithMock.default(env, ctx, details, false);
       assert.strictEqual(resp.status, 206);
@@ -647,7 +1015,7 @@ describe('Object copy', () => {
     it('handles a continuation token w/ more', async () => {
       const continuationToken = 'copy-mydir-mydir/newdir-uuid';
       const remaining = [];
-      for (let i = 0; i < 900; i++) {
+      for (let i = 0; i < 900; i += 1) {
         remaining.push(`mydir/file${i}.html`);
       }
       remaining.push('mydir/abc.html');
@@ -661,12 +1029,13 @@ describe('Object copy', () => {
           },
           get(key) {
             return DA_JOBS[key];
-          }
+          },
         },
-        dacollab: { fetch: () => {} }
-      }
+        dacollab: { fetch: () => ({ body: { cancel: () => {} } }) },
+      };
 
       // Mock getObject to return content type for HEAD requests
+      // eslint-disable-next-line no-shadow
       const mockGetObject = async (env, { bucket, org, key }, head) => {
         if (head && bucket === 'root-bucket' && org === 'foo' && key.startsWith('mydir/')) {
           return {
@@ -691,17 +1060,15 @@ describe('Object copy', () => {
         continuationToken,
       };
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const resp = await copyObjectWithMock.default(env, ctx, details, false);
       assert.strictEqual(resp.status, 206);
@@ -723,12 +1090,13 @@ describe('Object copy', () => {
           },
           delete(key) {
             delete DA_JOBS[key];
-          }
+          },
         },
-        dacollab: { fetch: () => {} }
-      }
+        dacollab: { fetch: () => ({ body: { cancel: () => {} } }) },
+      };
 
       // Mock getObject to return content type for HEAD requests
+      // eslint-disable-next-line no-shadow
       const mockGetObject = async (env, { bucket, org, key }, head) => {
         if (head && bucket === 'root-bucket' && org === 'foo' && key === 'mydir/abc.html') {
           return {
@@ -753,17 +1121,15 @@ describe('Object copy', () => {
         continuationToken,
       };
       const s3Sent = [];
-      s3Mock.on(CopyObjectCommand).callsFake((input => {
+      s3Mock.on(CopyObjectCommand).callsFake(((input) => {
         s3Sent.push(input);
       }));
 
-      const copyObjectWithMock = await esmock(
-        '../../../src/storage/object/copy.js', {
-          '../../../src/storage/object/get.js': {
-            default: mockGetObject,
-          },
-        }
-      );
+      const copyObjectWithMock = await esmock('../../../src/storage/object/copy.js', {
+        '../../../src/storage/object/get.js': {
+          default: mockGetObject,
+        },
+      });
 
       const resp = await copyObjectWithMock.default(env, ctx, details, false);
       assert.strictEqual(resp.status, 204);

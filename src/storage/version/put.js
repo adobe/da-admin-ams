@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -20,6 +20,8 @@ import {
   getUsersForMetadata, ifMatch, ifNoneMatch,
 } from '../utils/version.js';
 import getObject from '../object/get.js';
+import { writeAuditEntry } from './audit.js';
+import { versionKey, isValidId, isSafeId } from './paths.js';
 
 export function getContentLength(body) {
   if (body === undefined) {
@@ -31,18 +33,28 @@ export function getContentLength(body) {
     return new Blob([body]).size;
   } else if (body instanceof File) {
     return body.size;
+  } else if (body instanceof ArrayBuffer) {
+    return body.byteLength;
   }
   return undefined;
 }
 
+/**
+ * @param {object} config - S3 config
+ * @param {object} params - Bucket, Org, Repo (optional), Body, ID, Version, Ext,
+ *   Metadata, ContentLength, ContentType
+ * @param {boolean} [noneMatch=true]
+ * @returns {Promise<{ status: number }>}
+ */
 export async function putVersion(config, {
-  Bucket, Org, Body, ID, Version, Ext, Metadata, ContentLength, ContentType,
+  Bucket, Org, Repo, Body, ID, Version, Ext, Metadata, ContentLength, ContentType,
 }, noneMatch = true) {
   const length = ContentLength ?? getContentLength(Body);
 
   const client = noneMatch ? ifNoneMatch(config) : new S3Client(config);
+  const key = `${Org}/${versionKey(Repo, ID, Version, Ext)}`;
   const input = {
-    Bucket, Key: `${Org}/.da-versions/${ID}/${Version}.${Ext}`, Body, Metadata, ContentLength: length, ContentType,
+    Bucket, Key: key, Body, Metadata, ContentLength: length, ContentType,
   };
   const command = new PutObjectCommand(input);
   try {
@@ -52,8 +64,28 @@ export async function putVersion(config, {
     const status = e.$metadata?.httpStatusCode || 500;
     // eslint-disable-next-line no-console
     if (status >= 500) console.error('Fail to put version', e);
-    return { status };
+    // Cancel the body stream if it wasn't consumed (e.g. R2 rejected via 100-continue on 412).
+    // Without this, Cloudflare Workers logs "non-retryable streaming request" warnings.
+    if (Body?.cancel) Body.cancel();
+    return { status, ...(status >= 500 ? { error: e.message } : {}) };
   }
+}
+
+function shouldCreateVersion(contentType) {
+  // Only create versions for HTML and JSON files
+  if (!contentType) return false;
+  const type = contentType.toLowerCase();
+  return type.startsWith('text/html') || type.startsWith('application/json');
+}
+
+// Infer a versionable contentType from the file extension when the stored
+// ContentType is missing or octet-stream (legacy imports). Returns the original
+// contentType when it is already versionable, or when we cannot map the extension.
+function inferVersionableType(contentType, ext) {
+  if (shouldCreateVersion(contentType)) return contentType;
+  if (ext === 'html') return 'text/html';
+  if (ext === 'json') return 'application/json';
+  return contentType;
 }
 
 function buildInput({
@@ -67,124 +99,289 @@ function buildInput({
   };
 }
 
-export async function putObjectWithVersion(env, daCtx, update, body, guid) {
+const MAX_PUT_ATTEMPTS = 5;
+
+export async function putObjectWithVersion(
+  env,
+  daCtx,
+  update,
+  body,
+  guid,
+  clientConditionals = null,
+  putAttempt = 0,
+) {
   const config = getS3Config(env);
-  // While we are automatically storing the body once for the 'Collab Parse' changes, we never
-  // do a HEAD, because we may need the content. Once we don't need to do this automatic store
-  // any more, we can change the 'false' argument in the next line back to !body.
   const current = await getObject(env, update, false);
+  // Buffer current.body so it survives AWS SDK internal retries inside putVersion.
+  // A ReadableStream can only be consumed once; ArrayBuffer can be reused freely.
+  if (current.body instanceof ReadableStream) {
+    current.body = await new Response(current.body).arrayBuffer();
+  }
 
   let ID = current.metadata?.id;
   if (!ID) {
+    // A client-supplied guid becomes this document's file id and is written into the
+    // reserved .da-versions key space. Require a plain UUID so a crafted guid cannot
+    // place keys outside that space, for example a value with a slash or a
+    // .da-versions segment.
+    if (guid && !isValidId(guid)) {
+      return { status: 400, metadata: {} };
+    }
     ID = guid || crypto.randomUUID();
+  } else if (!isSafeId(ID)) {
+    // A stored file id is untrusted input. An id persisted before this validation
+    // existed could contain key steering characters. Refuse to build reserved keys
+    // from an unsafe stored id. A benign legacy id (a single segment that is not
+    // .da-versions) is still allowed.
+    return { status: 400, metadata: {} };
   } else if (guid && ID !== guid) {
     return { status: 409, metadata: { id: ID } };
   }
+
+  // Only create versions for HTML and JSON files
+  const contentType = update.type || current.contentType;
+  const createVersion = shouldCreateVersion(contentType);
 
   const Version = current.metadata?.version || crypto.randomUUID();
   const Users = JSON.stringify(getUsersForMetadata(daCtx.users));
   const input = buildInput(update);
   const Timestamp = `${Date.now()}`;
-  const Path = update.key;
+  const Path = update.key ?? daCtx.key ?? '';
+
+  // Validate conflicting conditionals - both headers present is unusual for PUT
+  let effectiveConditionals = clientConditionals;
+  if (clientConditionals?.ifMatch && clientConditionals?.ifNoneMatch) {
+    // Per RFC 7232, If-Match should be evaluated first for PUT/POST
+    // If-None-Match for PUT is less common (create-only semantics)
+    // eslint-disable-next-line no-console
+    console.warn('Both If-Match and If-None-Match provided, prioritizing If-Match per RFC 7232');
+    // Clear If-None-Match to prevent confusion
+    effectiveConditionals = { ifMatch: clientConditionals.ifMatch };
+  }
+
+  // Handle client-provided If-Match: * (requires resource to exist)
+  if (effectiveConditionals?.ifMatch === '*') {
+    if (current.status === 404) {
+      return { status: 412, metadata: { id: ID } };
+    }
+    // Resource exists, proceed with update using actual ETag
+    // Fall through to update logic below with current.etag
+  }
+
+  // Handle client-provided If-None-Match: * (requires resource NOT to exist)
+  if (effectiveConditionals?.ifNoneMatch === '*') {
+    if (current.status !== 404) {
+      return { status: 412, metadata: { id: ID } };
+    }
+    // Resource doesn't exist, proceed with create
+    // Fall through to create logic below
+  }
 
   if (current.status === 404) {
-    const client = ifNoneMatch(config);
+    const metadata = {
+      ID, Users, Timestamp, Path,
+    };
+    // Only include Version metadata for files that support versioning
+    if (createVersion) {
+      metadata.Version = Version;
+    }
+    // Use client conditional if provided, otherwise use internal If-None-Match: *
+    const client = effectiveConditionals?.ifNoneMatch
+      ? ifNoneMatch(config, effectiveConditionals.ifNoneMatch)
+      : ifNoneMatch(config);
     const command = new PutObjectCommand({
       ...input,
-      Metadata: {
-        ID, Version, Users, Timestamp, Path,
-      },
+      Metadata: metadata,
     });
     try {
       const resp = await client.send(command);
       return resp.$metadata.httpStatusCode === 200
-        ? { status: 201, metadata: { id: ID } }
-        : { status: resp.$metadata.httpStatusCode, metadata: { id: ID } };
+        ? { status: 201, metadata: { id: ID }, etag: resp.ETag }
+        : { status: resp.$metadata.httpStatusCode, metadata: { id: ID }, etag: resp.ETag };
     } catch (e) {
       const status = e.$metadata?.httpStatusCode || 500;
       if (status === 412) {
-        return putObjectWithVersion(env, daCtx, update, body);
+        // Only retry if no client conditionals (internal operation) and under retry limit
+        if (!effectiveConditionals?.ifNoneMatch && putAttempt < MAX_PUT_ATTEMPTS) {
+          return putObjectWithVersion(
+            env,
+            daCtx,
+            update,
+            body,
+            guid,
+            clientConditionals,
+            putAttempt + 1,
+          );
+        }
+        // Client conditional failed or max retries exceeded, return 412
+        return { status: 412, metadata: { id: ID } };
       }
 
       // eslint-disable-next-line no-console
       if (status >= 500) console.error('Failed to put object (in object with version)', e);
-      return { status, metadata: { id: ID } };
+      return { status, metadata: { id: ID }, ...(status >= 500 ? { error: e.message } : {}) };
     }
   }
 
   const pps = current.metadata?.preparsingstore || '0';
+  let storeBody = false;
+  let versionCreated = false;
+  let Label = update.label;
 
-  // Store the body if preparsingstore is not defined, so a once-off store
-  let storeBody = !body && pps === '0';
-  const Preparsingstore = storeBody ? Timestamp : pps;
-  let Label = storeBody ? 'Collab Parse' : update.label;
-
+  // Restore Point: we are about to empty the document body; store current content as a snapshot
   if (daCtx.method === 'PUT'
     && daCtx.ext === 'html'
     && current.contentLength > EMPTY_DOC_SIZE
     && (!update.body || update.body.size <= EMPTY_DOC_SIZE)) {
-    // we are about to empty the document body
-    // this should almost never happen but it does in some unexpectedcases
-    // we want then to store a version of the full document as a Restore Point
     // eslint-disable-next-line no-console
     console.warn(`Empty body, creating a restore point (${current.contentLength} / ${update.body?.size})`);
     storeBody = true;
     Label = 'Restore Point';
   }
 
-  const versionResp = await putVersion(config, {
-    Bucket: input.Bucket,
-    Org: daCtx.org,
-    Body: (body || storeBody ? current.body : ''),
-    ContentLength: (body || storeBody ? current.contentLength : undefined),
-    ContentType: current.contentType,
-    ID,
-    Version,
-    Ext: daCtx.ext,
-    Metadata: {
-      Users: current.metadata?.users || JSON.stringify([{ email: 'anonymous' }]),
-      Timestamp: current.metadata?.timestamp || Timestamp,
-      Path: current.metadata?.path || Path,
-      Label,
-    },
-  });
+  const Preparsingstore = storeBody ? Timestamp : pps;
 
-  if (versionResp.status !== 200 && versionResp.status !== 412) {
-    return { status: versionResp.status, metadata: { id: ID } };
+  // Only create version for explicit label (POST /versionsource) or Restore Point. No Collab Parse.
+  const shouldCreateVersionObject = createVersion
+    && (update.label != null || Label === 'Restore Point');
+
+  if (shouldCreateVersionObject) {
+    const versionResp = await putVersion(config, {
+      Bucket: input.Bucket,
+      Org: daCtx.org,
+      Repo: daCtx.site || undefined,
+      Body: (body || storeBody ? current.body : ''),
+      ContentLength: (body || storeBody ? current.contentLength : undefined),
+      ContentType: contentType,
+      ID,
+      Version,
+      Ext: daCtx.ext,
+      Metadata: {
+        Users: current.metadata?.users || JSON.stringify([{ email: 'anonymous' }]),
+        Timestamp: current.metadata?.timestamp || Timestamp,
+        Path: current.metadata?.path || Path,
+        Label,
+      },
+    });
+
+    if (versionResp.status !== 200 && versionResp.status !== 412) {
+      return { status: versionResp.status, metadata: { id: ID } };
+    }
+    // 412 means the version key already exists — a concurrent request created it first.
+    // The version IS persisted in R2, so treat it as created.
+    versionCreated = versionResp.status === 200 || versionResp.status === 412;
   }
 
-  const client = ifMatch(config, `${current.etag}`);
+  // Audit: one entry per versionable PUT; versionLabel + versionId when labelled version created.
+  // Store path without repo prefix and versionId without extension for readability.
+  if (createVersion) {
+    const versionId = versionCreated ? Version : undefined;
+    const versionLabel = versionCreated ? (Label ?? '') : undefined;
+    const pathForAudit = (daCtx.site && Path.startsWith(`${daCtx.site}/`))
+      ? Path.slice(daCtx.site.length)
+      : Path;
+    await writeAuditEntry(env, { bucket: input.Bucket, org: daCtx.org }, daCtx.site, ID, {
+      timestamp: Timestamp,
+      users: Users,
+      path: pathForAudit,
+      versionLabel,
+      versionId,
+    });
+  }
+
+  const metadata = {
+    ID, Users, Timestamp, Path, Preparsingstore,
+  };
+  // Only include Version metadata for files that support versioning
+  if (createVersion) {
+    metadata.Version = crypto.randomUUID();
+  }
+  // Use client-provided If-Match if available, otherwise use current ETag
+  // Special case: If client sent If-Match:*, we already validated existence above,
+  // so now use the actual ETag for proper version control
+  let matchValue;
+  if (effectiveConditionals?.ifMatch === '*') {
+    matchValue = `${current.etag}`;
+  } else {
+    matchValue = effectiveConditionals?.ifMatch || `${current.etag}`;
+  }
+  const client = ifMatch(config, matchValue);
   const command = new PutObjectCommand({
     ...input,
-    Metadata: {
-      ID, Version: crypto.randomUUID(), Users, Timestamp, Path, Preparsingstore,
-    },
+    Metadata: metadata,
   });
   try {
     const resp = await client.send(command);
 
-    return { status: resp.$metadata.httpStatusCode, metadata: { id: ID } };
+    return {
+      status: resp.$metadata.httpStatusCode,
+      metadata: { id: ID },
+      etag: resp.ETag,
+      versionCreated,
+    };
   } catch (e) {
     const status = e.$metadata?.httpStatusCode || 500;
     if (status === 412) {
-      return putObjectWithVersion(env, daCtx, update, body);
+      // Retry when no client conditional (internal operation) or when the client sent
+      // If-Match: * (wildcard — asserts existence only, already verified above; a concurrent
+      // write changed the ETag, so re-fetch and retry like the no-conditional path).
+      // A specific ETag means the client explicitly requires that version, so propagate 412.
+      const shouldRetry = !effectiveConditionals?.ifMatch
+        || effectiveConditionals.ifMatch === '*';
+      if (shouldRetry && putAttempt < MAX_PUT_ATTEMPTS) {
+        return putObjectWithVersion(
+          env,
+          daCtx,
+          update,
+          body,
+          guid,
+          clientConditionals,
+          putAttempt + 1,
+        );
+      }
+      return { status: 412, metadata: { id: ID } };
     }
 
     // eslint-disable-next-line no-console
     if (status >= 500) console.error('Failed to version (in object with version)', e);
-    return { status, metadata: { id: ID } };
+    return { status, metadata: { id: ID }, ...(status >= 500 ? { error: e.message } : {}) };
   }
 }
 
 export async function postObjectVersionWithLabel(label, env, daCtx) {
-  const { body, contentLength, contentType } = await getObject(env, daCtx);
+  const {
+    body, contentLength, contentType, status: currentStatus,
+  } = await getObject(env, daCtx);
+  // Buffer the ReadableStream so the body survives retries inside putObjectWithVersion.
+  // A ReadableStream can only be consumed once; ArrayBuffer can be reused freely.
+  const bodyBuffer = body instanceof ReadableStream ? await new Response(body).arrayBuffer() : body;
   const { bucket, org, key } = daCtx;
 
+  // Legacy imports may have lost their ContentType metadata (stored as
+  // application/octet-stream). Recover the correct mime from the file
+  // extension so the version write + main-object PUT both heal.
+  const inferredType = inferVersionableType(contentType, daCtx.ext);
+
   const resp = await putObjectWithVersion(env, daCtx, {
-    bucket, org, key, body, contentLength, type: contentType, label,
+    bucket, org, key, body: bodyBuffer, contentLength, type: inferredType, label,
   }, true);
 
-  return { status: resp.status === 200 ? 201 : resp.status };
+  if (resp.status !== 200) return { status: resp.status };
+  if (!resp.versionCreated) {
+    // Diagnostic: the silent-500 path lands here when the source object's contentType
+    // is not html/json (e.g. legacy imports with missing ContentType metadata) so
+    // shouldCreateVersion gates out and no version is written.
+    // eslint-disable-next-line no-console
+    console.error('Failed to version (no version created)', {
+      contentType,
+      inferredType,
+      ext: daCtx.ext,
+      hadLabel: label != null,
+      currentStatus,
+    });
+    return { status: 500, error: 'Version was not created' };
+  }
+  return { status: 201 };
 }
 
 export async function postObjectVersion(req, env, daCtx) {
@@ -195,5 +392,6 @@ export async function postObjectVersion(req, env, daCtx) {
     // no body
   }
   const label = reqJSON?.label;
-  return /* await */ postObjectVersionWithLabel(label, env, daCtx);
+  if (!label) return { status: 400, error: 'label is required' };
+  return postObjectVersionWithLabel(label, env, daCtx);
 }

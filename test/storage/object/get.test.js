@@ -18,13 +18,13 @@ import {
 import { mockClient } from 'aws-sdk-client-mock';
 import esmock from 'esmock';
 
-const s3Mock = mockClient(S3Client);
-
 import getObject from '../../../src/storage/object/get.js';
+
+const s3Mock = mockClient(S3Client);
 
 const ORG = 'adobe';
 const KEY = 'wknd/index.html';
-const BUCKET = `root-bucket`;
+const BUCKET = 'root-bucket';
 
 const S3_KEY = `${ORG}/${KEY}`;
 
@@ -37,7 +37,7 @@ describe('Get Object', () => {
     const Body = Buffer.from('<p>hello world</p>');
     const ContentType = 'text/html';
     const ContentLength = Body.length;
-    const LastModified = new Date().toISOString
+    const LastModified = new Date().toISOString;
     const Metadata = { foo: 'bar' };
     const ETag = 'etag123';
     s3Mock
@@ -73,7 +73,7 @@ describe('Get Object', () => {
         '@aws-sdk/s3-request-presigner': {
           getSignedUrl: async () => fakeUrl,
         },
-      }
+      },
     );
 
     const savedFetch = globalThis.fetch;
@@ -121,10 +121,69 @@ describe('Get Object', () => {
       Key: S3_KEY,
     }).rejects(error);
     // Import getObject directly for head=false (no esmock needed)
+    // eslint-disable-next-line no-shadow
     const getObject = (await import('../../../src/storage/object/get.js')).default;
     const resp = await getObject({}, { bucket: BUCKET, org: ORG, key: KEY }, false);
     assert.strictEqual(resp.status, 404);
     assert.strictEqual(resp.body, '');
     assert.strictEqual(resp.contentLength, 0);
+  });
+
+  it('logs the error when S3/R2 returns a 500 (get_failed path produces empty Cloudflare Logs)', async () => {
+    // Regression: a backend 500 that carries $metadata.httpStatusCode was never logged,
+    // so Cloudflare Logs was empty and the root cause was invisible in production.
+    const error = new Error('We encountered an internal error. Please try again.');
+    error.$metadata = { httpStatusCode: 500 };
+    s3Mock.on(GetObjectCommand, {
+      Bucket: BUCKET,
+      Key: S3_KEY,
+    }).rejects(error);
+
+    const errors = [];
+    const origError = console.error;
+    console.error = (...args) => {
+      errors.push(args);
+    };
+    let resp;
+    try {
+      // eslint-disable-next-line no-shadow
+      const getObject = (await import('../../../src/storage/object/get.js')).default;
+      resp = await getObject({}, { bucket: BUCKET, org: ORG, key: KEY }, false);
+    } finally {
+      console.error = origError;
+    }
+
+    assert.strictEqual(resp.status, 500);
+    assert.strictEqual(resp.error, error.message);
+    assert(errors.length > 0, 'get_failed must log the error so it appears in Cloudflare Logs');
+    assert.strictEqual(errors[0][0], 'Error getting object');
+    assert.strictEqual(errors[0][1], error);
+  });
+
+  it('logs a distinct message when the error has no httpStatusCode (network/timeout failure)', async () => {
+    const error = new Error('Network connection lost');
+    s3Mock.on(GetObjectCommand, {
+      Bucket: BUCKET,
+      Key: S3_KEY,
+    }).rejects(error);
+
+    const errors = [];
+    const origError = console.error;
+    console.error = (...args) => {
+      errors.push(args);
+    };
+    let resp;
+    try {
+      // eslint-disable-next-line no-shadow
+      const getObject = (await import('../../../src/storage/object/get.js')).default;
+      resp = await getObject({}, { bucket: BUCKET, org: ORG, key: KEY }, false);
+    } finally {
+      console.error = origError;
+    }
+
+    assert.strictEqual(resp.status, 500);
+    assert(errors.length > 0, 'must log the error so it appears in Cloudflare Logs');
+    assert.strictEqual(errors[0][0], 'Error getting object without httpStatusCode');
+    assert.strictEqual(errors[0][1], error);
   });
 });

@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -61,7 +61,14 @@ export async function setUser(userId, expiration, reqHeaders, env) {
     orgs,
   });
 
-  await env.DA_AUTH.put(userId, value, { expiration });
+  try {
+    await env.DA_AUTH.put(userId, value, { expiration });
+  } catch (e) {
+    // KV rejects expiration timestamps < 60s in the future (near-expiry tokens).
+    // Log and continue — user is still authenticated, just not cached.
+    // eslint-disable-next-line no-console
+    console.error('Failed to cache user in KV', e);
+  }
   return value;
 }
 
@@ -147,7 +154,7 @@ export async function getUsers(req, env) {
     if (type !== 'access_token') return { email: 'anonymous' };
 
     const expires = Number(createdAt) + Number(expiresIn);
-    const now = Math.floor(new Date().getTime() / 1000);
+    const now = Date.now();
 
     if (expires < now) return { email: 'anonymous' };
     // Find the user in recent sessions
@@ -186,25 +193,56 @@ function getIdents(user) {
     }
   }
 
-  return idents;
+  return idents.map((ident) => ident?.toLowerCase());
+}
+
+// A page's assets live in a dot-folder next to it (e.g. `foo.html`'s images live under
+// `.foo/`). A recursive grant on `foo` or `foo/**` must also cover `.foo/**` so uploading
+// to a page's asset folder doesn't require a separate ACL entry.
+function dotFolderVariant(prefix) {
+  const trimmed = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  const slashIdx = trimmed.lastIndexOf('/');
+  const lastSegment = trimmed.slice(slashIdx + 1);
+  if (!lastSegment || lastSegment.startsWith('.')) return null;
+  return `${trimmed.slice(0, slashIdx + 1)}.${lastSegment}/`;
+}
+
+// A CONFIG keyword (`CONFIG` or `/{site}/CONFIG`) grants read to anyone with access to the
+// site/org (matched via a wildcard rule below), but write only if a rule targets the keyword
+// itself explicitly. This keeps site content-write grants from implicitly unlocking config writes.
+function isConfigKeyword(target) {
+  return target === 'CONFIG' || target.endsWith('/CONFIG');
 }
 
 export function getUserActions(pathLookup, user, target) {
   const idents = getIdents(user);
+  const isConfigTarget = isConfigKeyword(target);
 
   const plVals = idents.map((key) => pathLookup.get(key) || []);
   const actions = plVals.map((entries) => entries
     .find(({ path }) => {
-      if (path.endsWith('/+**')) return target.startsWith(path.slice(0, -3)) || target === path.slice(0, -4);
+      if (path.endsWith('/+**')) {
+        const prefix = path.slice(0, -3);
+        const dotPrefix = dotFolderVariant(prefix);
+        return target.startsWith(prefix) || target === path.slice(0, -4)
+          || (dotPrefix && target.startsWith(dotPrefix));
+      }
       if (target.length < path.length) return false;
-      if (path.endsWith('/**')) return target.startsWith(path.slice(0, -2));
+      if (path.endsWith('/**')) {
+        const prefix = path.slice(0, -2);
+        const dotPrefix = dotFolderVariant(prefix);
+        return target.startsWith(prefix) || (dotPrefix && target.startsWith(dotPrefix));
+      }
       if (target.endsWith('.html')) return target.slice(0, -5) === path || target === path;
       return target === path;
     }))
     .filter((a) => a);
 
   return {
-    actions: new Set(actions.flatMap(({ actions: acts }) => acts)),
+    actions: new Set(actions.flatMap(({ actions: acts, path }) => {
+      if (isConfigTarget && path !== target) return acts.filter((act) => act === 'read');
+      return acts;
+    })),
     trace: actions,
   };
 }
@@ -221,10 +259,48 @@ export function pathSorter({ path: path1 }, { path: path2 }) {
   return sp2.length - sp1.length;
 }
 
+/**
+ * The site of a config request, derived from its key (the path below the org).
+ * For `/config/{org}` the key is empty (org config, no site). For
+ * `/config/{org}/{site}` and `/config/{org}/{site}/...` the site is the first
+ * key segment. Note that `daCtx.site` is unreliable here: for the bare
+ * `/config/{org}/{site}` request the site name is parsed as the filename, leaving
+ * `daCtx.site` undefined, so the key is the source of truth.
+ */
+function configSite(key) {
+  const [site] = (key || '').split('/').filter((part) => part.length > 0);
+  return site;
+}
+
+/**
+ * The keyword path naming the config resource of the given request: the per-site
+ * `/{site}/CONFIG` for site config, or the org-level `CONFIG` for org config. The
+ * `CONFIG` portion is always uppercase so it cannot collide with a content path.
+ * Access is granted via this keyword OR the org `CONFIG` keyword (see the config route).
+ */
+export function configPermissionPath(daCtx) {
+  const site = configSite(daCtx.key);
+  return site ? `/${site}/CONFIG` : 'CONFIG';
+}
+
 export async function getAclCtx(env, org, users, key, api) {
   const pathLookup = new Map();
 
-  const props = await env.DA_CONFIG?.get(org, { type: 'json' });
+  if (api === 'logout') {
+    return {
+      pathLookup,
+      actionSet: new Set(['read']),
+    };
+  }
+
+  let props;
+  try {
+    props = await env.DA_CONFIG?.get(org, { type: 'json' });
+  } catch {
+    // KV rejects keys longer than 512 bytes (e.g. IMS auth fragments leaking into the URL path).
+    // Treat as no config found — deny all access rather than propagating a 500.
+    return { pathLookup, actionSet: new Set() };
+  }
 
   if (props && props[':type'] === 'sheet' && props[':sheetname'] === 'permissions') {
     // It's a single-sheet, move the data to the right place
@@ -236,6 +312,32 @@ export async function getAclCtx(env, org, users, key, api) {
       pathLookup,
       actionSet: new Set(['read', 'write']),
     };
+  }
+
+  if (env.DA_OPS_IMS_ORG) {
+    props.permissions.data.push({
+      path: 'CONFIG',
+      groups: env.DA_OPS_IMS_ORG,
+      actions: 'write',
+    });
+    props.permissions.data.push({
+      path: '/ + **',
+      groups: env.DA_OPS_IMS_ORG,
+      actions: 'write',
+    });
+  }
+
+  if (env.DA_OPS_IMS_BOT_EMAIL) {
+    props.permissions.data.push({
+      path: 'CONFIG',
+      groups: env.DA_OPS_IMS_BOT_EMAIL,
+      actions: 'write',
+    });
+    props.permissions.data.push({
+      path: '/ + **',
+      groups: env.DA_OPS_IMS_BOT_EMAIL,
+      actions: 'write',
+    });
   }
 
   const aclTrace = [];
@@ -253,19 +355,27 @@ export async function getAclCtx(env, org, users, key, api) {
       effectivePath = effectivePath.slice(0, -1);
     }
 
-    groups.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0).forEach((group) => {
+    groups.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0).forEach((g) => {
+      const group = g.toLowerCase();
       if (!pathLookup.has(group)) pathLookup.set(group, []);
-      pathLookup
-        .get(group)
-        .push({
+      const groupEntries = pathLookup.get(group);
+      const effectiveActions = actions
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+        .flatMap((entry) => (entry === 'write' ? ['read', 'write'] : [entry]));
+
+      const existingEntry = groupEntries.find((e) => e.path === effectivePath);
+      if (existingEntry) {
+        const merged = new Set([...existingEntry.actions, ...effectiveActions]);
+        existingEntry.actions = [...merged];
+      } else {
+        groupEntries.push({
           group,
           path: effectivePath,
-          actions: actions
-            .split(',')
-            .map((entry) => entry.trim())
-            .filter((entry) => entry.length > 0)
-            .flatMap((entry) => (entry === 'write' ? ['read', 'write'] : [entry])),
+          actions: effectiveActions,
         });
+      }
     });
   });
   pathLookup.forEach((value) => value.sort(pathSorter));
@@ -273,7 +383,8 @@ export async function getAclCtx(env, org, users, key, api) {
   // Do a lookup for the base key, we always need this info
   let k;
   if (api === 'config') {
-    k = 'CONFIG';
+    const site = configSite(key);
+    k = site ? `/${site}/CONFIG` : 'CONFIG';
   } else {
     k = key.startsWith('/') ? key : `/${key}`;
   }
@@ -290,14 +401,28 @@ export async function getAclCtx(env, org, users, key, api) {
       actionSet = actionSet.intersection(ua.actions);
       ua.trace.forEach((t) => actionTrace.push(t));
     });
+
+    // Site CONFIG access can also come from the org-level CONFIG keyword (see
+    // hasConfigPermission in the config route). Mirror that OR here so the cached
+    // actionSet - exposed to clients via the X-da-actions/X-da-child-actions headers -
+    // matches what the config route actually allows.
+    if (api === 'config' && k !== 'CONFIG') {
+      let orgActionSet = getUserActions(pathLookup, firstUser, 'CONFIG').actions;
+      otherUsers.forEach((u) => {
+        orgActionSet = orgActionSet.intersection(getUserActions(pathLookup, u, 'CONFIG').actions);
+      });
+      actionSet = actionSet.union(orgActionSet);
+    }
   } else {
     actionSet = new Set();
   }
 
   // Expose the action trace or not?
-  actionTrace = users.every((u) => aclTrace.includes(u.email)) ? actionTrace : undefined;
+  actionTrace = users.every((u) => aclTrace.includes(u.email?.toLowerCase()))
+    ? actionTrace
+    : undefined;
 
-  if (k === 'CONFIG' || api === 'versionsource') {
+  if (api === 'config' || api === 'versionsource') {
     actionSet.add('read');
   }
 
@@ -371,12 +496,45 @@ export function getChildRules(daCtx) {
   daCtx.aclCtx.childRules = [`${probeDir}**=${[...resultSet].join(',')}`];
 }
 
+/**
+ * Whether the user has `action` on some path at or below `path` (a descendant,
+ * or `path` itself). Used to let a listing of an ancestor folder proceed even
+ * when the user has no permission on the folder itself - e.g. a user granted
+ * read on `/folder2/a/b/c` only should still see `folder2` when listing `/`.
+ * Keyword paths (CONFIG, ACLTRACE) are ignored since they don't represent
+ * content and must not leak directory visibility.
+ */
+export function hasDescendantPermission(daCtx, path, action = 'read') {
+  if (path === null || path === undefined) return false;
+  const { pathLookup } = daCtx.aclCtx;
+  if (pathLookup.size === 0) return true;
+
+  const p = !path.startsWith('/') ? `/${path}` : path;
+  const dirKey = p === '/' ? '/' : `${p.endsWith('/') ? p.slice(0, -1) : p}/`;
+
+  return daCtx.users.every((u) => getIdents(u).some((ident) => (pathLookup.get(ident) || [])
+    .some((r) => {
+      if (!r.path.startsWith('/')) return false;
+      if (r.path === 'CONFIG' || r.path.endsWith('/CONFIG')) return false;
+      if (!r.actions.includes(action)) return false;
+
+      let base = r.path;
+      if (base.endsWith('/+**')) base = base.slice(0, -3);
+      else if (base.endsWith('/**')) base = base.slice(0, -2);
+      else base = base.endsWith('/') ? base : `${base}/`;
+
+      return base.startsWith(dirKey);
+    })));
+}
+
 export function hasPermission(daCtx, path, action, keywordPath = false) {
+  if (path === null || path === undefined) return false;
   if (daCtx.aclCtx.pathLookup.size === 0) {
     return true;
   }
 
-  const p = !path.startsWith('/') && !keywordPath ? `/${path}` : path;
+  const isKeyword = keywordPath || path === 'CONFIG';
+  const p = !path.startsWith('/') && !isKeyword ? `/${path}` : path;
   const k = daCtx.key.startsWith('/') ? daCtx.key : `/${daCtx.key}`;
 
   // is it the path from the context? then return the cached value
@@ -393,7 +551,7 @@ export function hasPermission(daCtx, path, action, keywordPath = false) {
 
   const permission = daCtx.users
     .every((u) => getUserActions(daCtx.aclCtx.pathLookup, u, p).actions.has(action));
-  if (!permission && !keywordPath) {
+  if (!permission && !isKeyword) {
     // eslint-disable-next-line no-console
     console.warn(`User ${daCtx.users.map((u) => u.email)} does not have permission to ${action} ${path}`);
   }

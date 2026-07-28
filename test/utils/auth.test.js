@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -9,7 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import assert from 'assert';
+/* eslint-disable no-shadow */
+import assert from 'node:assert';
 import esmock from 'esmock';
 
 // Mocks
@@ -18,12 +19,15 @@ import env from './mocks/env.js';
 import jose from './mocks/jose.js';
 import fetch from './mocks/fetch.js';
 import {
+  configPermissionPath,
   getAclCtx,
   getChildRules,
   getUserActions,
+  hasDescendantPermission,
   hasPermission,
   logout,
-  pathSorter } from '../../src/utils/auth.js';
+  pathSorter,
+} from '../../src/utils/auth.js';
 
 // ES Mocks
 const {
@@ -58,6 +62,39 @@ describe('DA auth', () => {
       assert.strictEqual(users[0].email, 'anonymous');
     });
 
+    it('anonymous if token expired with realistic IMS ms-scale timestamps', async () => {
+      // IMS JWT fields: created_at and expires_in are in milliseconds.
+      // Bug: auth.js computes `now` in seconds; ms-scale `expires` is always larger,
+      // so expired tokens are never rejected.
+      // Token issued 2h ago, valid for only 1h — clearly expired.
+      const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+
+      const { getUsers: getUsersMsExpired } = await esmock('../../src/utils/auth.js', {
+        jose: {
+          createRemoteJWKSet: () => null,
+          jwksCache: 'cache-key',
+          jwtVerify: () => ({
+            payload: {
+              type: 'access_token',
+              user_id: 'user@example.com',
+              created_at: Date.now() - TWO_HOURS_MS,
+              expires_in: ONE_HOUR_MS,
+            },
+          }),
+        },
+      });
+
+      const req = new Request(`https://${env.DA_DOMAIN}/source/cq/test`, {
+        headers: new Headers({ Authorization: 'Bearer sometoken' }),
+      });
+
+      await withMockedFetch(async () => {
+        const users = await getUsersMsExpired(req, env);
+        assert.strictEqual(users[0].email, 'anonymous');
+      });
+    });
+
     it('authorized if email matches', async () => {
       await withMockedFetch(async () => {
         const users = await getUsers(reqs.site, env);
@@ -68,7 +105,7 @@ describe('DA auth', () => {
     it('authorized with user if email matches and anonymous if present', async () => {
       await withMockedFetch(async () => {
         const users = await getUsers(reqs.siteMulti, env);
-        assert.strictEqual(users[0].email, 'anonymous')
+        assert.strictEqual(users[0].email, 'anonymous');
         assert.strictEqual(users[1].email, 'aparker@geometrixx.info');
       });
     });
@@ -82,7 +119,7 @@ describe('DA auth', () => {
   describe('set user', async () => {
     it('sets user', async () => {
       const headers = new Headers({
-        'Authorization': `Bearer aparker@geometrixx.info`,
+        Authorization: 'Bearer aparker@geometrixx.info',
       });
 
       let userValue;
@@ -96,299 +133,751 @@ describe('DA auth', () => {
       assert.strictEqual('123', userValue.ident);
 
       const expectedOrgs = [
-        { orgName: 'Org1',
+        {
+          orgName: 'Org1',
           orgIdent: '2345B0EA551D747',
           groups: [
             { groupName: 'READ_WRITE_STANDARD@DEV' },
             { groupName: 'READ_ONLY_STANDARD@PROD' },
-          ]},
+          ],
+        },
         { orgName: 'Org No groups', orgIdent: '139024093', groups: [] },
-        { orgName: 'ACME Inc.',
+        {
+          orgName: 'ACME Inc.',
           orgIdent: 'EE23423423423',
           groups: [
             { groupName: 'Emp' },
             { groupName: 'org-test' },
-          ]},
+          ],
+        },
       ];
       assert.deepStrictEqual(expectedOrgs, userValue.orgs);
     });
+
+    it('returns user value when KV PUT fails for near-expiry token', async () => {
+      // Near-expiry tokens have < 60s remaining; KV rejects the expiration timestamp.
+      // Bug: the thrown error propagates up through getUsers -> getDaCtx -> 500.
+      // Fix: setUser must catch the KV PUT failure and still return the user value.
+      const headers = new Headers({ Authorization: 'Bearer aparker@geometrixx.info' });
+      const kvPutError = new Error(
+        'KV PUT failed: 400 Invalid expiration of 1777144621.'
+        + ' Expiration times must be at least 60 seconds in the future.',
+      );
+      const failEnv = {
+        ...env,
+        DA_AUTH: { ...env.DA_AUTH, put: () => { throw kvPutError; } },
+      };
+
+      let userValue;
+      await withMockedFetch(async () => {
+        const userValStr = await setUser('aparker@geometrixx.info', 100, headers, failEnv);
+        userValue = JSON.parse(userValStr);
+      });
+
+      assert.strictEqual(userValue.email, 'aparker@geometrixx.info');
+    });
   });
 
-  describe('path authorization', async () =>  {
+  describe('path authorization', async () => {
     const DA_CONFIG = {
-      'test': {
-        "total": 1,
-        "limit": 1,
-        "offset": 0,
-        "permissions": {
-          "data": [
+      test: {
+        total: 1,
+        limit: 1,
+        offset: 0,
+        permissions: {
+          data: [
             {
-              "path": "/x",
-              "groups": "2345B0EA551D747/4711,123,joe@bloggs.org",
-              "actions": "write",
+              path: '/x',
+              groups: '2345B0EA551D747/4711,123,joe@bloggs.org,MEL@bloggs.org',
+              actions: 'write',
             },
             {
-              "path": "/**",
-              "groups": "2345B0EA551D747/4711,123,joe@bloggs.org",
-              "actions": "read",
+              path: '/**',
+              groups: '2345B0EA551D747/4711,123,joe@bloggs.org,MEL@bloggs.org',
+              actions: 'read',
             },
             {
-              "path": "/**",
-              "groups": "2345B0EA551D747/8080",
-              "actions": "write",
+              path: '/**',
+              groups: '2345B0EA551D747/8080',
+              actions: 'write',
             },
             {
-              "path": "/foo",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "write",
+              path: '/foo',
+              groups: '2345B0EA551D747/4711',
+              actions: 'write',
             },
             {
-              "path": "/bar/ + **",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "write",
+              path: '/bar/ + **',
+              groups: '2345B0EA551D747/4711',
+              actions: 'write',
             },
             {
-              "path": "/bar/",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "read",
+              path: '/bar/',
+              groups: '2345B0EA551D747/4711',
+              actions: 'read',
             },
             {
-              "path": "/bar/q",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "read",
+              path: '/bar/q',
+              groups: '2345B0EA551D747/4711',
+              actions: 'read',
             },
             {
-              "path": "/",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "write",
+              path: '/',
+              groups: '2345B0EA551D747/4711',
+              actions: 'write',
             },
             {
-              "path": "/furb/",
-              "groups": "2345B0EA551D747/4711",
-              "actions": "write",
+              path: '/furb/',
+              groups: '2345B0EA551D747/4711',
+              actions: 'write',
             },
             {
-              "path": "ACLTRACE",
-              "groups": "joe@bloggs.org",
-              "actions": "read",
+              path: '/tar/abc',
+              groups: '2345B0ea551D747/4711',
+              actions: 'write',
             },
             {
-              "path": "CONFIG",
-              "groups": "123",
-              "actions": "write",
-            }
-          ]
+              path: 'ACLTRACE',
+              groups: 'joe@bloggs.org,MEL@bloggs.org',
+              actions: 'read',
+            },
+            {
+              path: 'CONFIG',
+              groups: '123',
+              actions: 'write',
+            },
+          ],
         },
-        ":type": "multi-sheet"
-      }
+        ':type': 'multi-sheet',
+      },
     };
 
     const env2 = {
       DA_CONFIG: {
-        get: (name) => {
-          return DA_CONFIG[name];
-        },
-      }
+        get: (name) => DA_CONFIG[name],
+      },
     };
 
     it('test path sorting', async () => {
-      const users = [{groups: [{orgIdent: '2345B0EA551D747', groupName: 4711}]}];
+      const users = [{ groups: [{ orgIdent: '2345B0EA551D747', groupName: 4711 }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/mykey');
-      const paths = aclCtx.pathLookup.get('2345B0EA551D747/4711').map((x) => x.path);
+      const paths = aclCtx.pathLookup.get('2345b0ea551d747/4711').map((x) => x.path);
 
-      assert.strictEqual(8, paths.length);
-      assert.strictEqual('/bar/q', paths[0], 'q should be counted as shorter than +**');
-      assert.strictEqual('/bar/+**', paths[1], 'bar/+** should be longer than bar/');
-      assert(paths[3] === '/bar' || paths[4] === '/bar', 'Within the same length there is no order');
-      assert.strictEqual('/x', paths[5]);
-      assert(paths[6] === '/**' || paths[7] === '/**', '/** should be counted as longer than /x');
+      assert.strictEqual(9, paths.length);
+      assert.strictEqual('/bar/q', paths[1], 'q should be counted as longer than +**');
+      assert.strictEqual('/bar/+**', paths[2], 'bar/+** should be longer than bar/');
+      assert(paths[4] === '/bar' || paths[5] === '/bar', 'Within the same length there is no order');
+      assert.strictEqual('/x', paths[6]);
+      assert(paths[7] === '/**' || paths[8] === '/**', '/** should be counted as shorter than /x');
+    });
+
+    it('test hasPermission returns false when path is null or undefined', async () => {
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '4711' }] }] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/test');
+
+      // Test with null path - should return false
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, null, 'read'));
+
+      // Test with undefined path - should return false
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, undefined, 'read'));
+
+      // Test with empty string path - should NOT return false (valid root path)
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '', 'read'));
     });
 
     it('test anonymous permissions', async () => {
-      const users = [{email: 'anonymous'}];
+      const users = [{ email: 'anonymous' }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/test');
 
-      assert(!hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'write'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'write'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'write'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'write'));
     });
 
     it('test hasPermissions', async () => {
       const key = '';
-      const users = [{orgs: [{orgIdent: '2345B0EA551D747', groups: [{groupName: '4711'}]}]}];
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '4711' }] }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, key);
 
-      assert(hasPermission({users, org: 'test', aclCtx, key}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key}, '/test', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/foo', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/bar', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/bar/something.jpg', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/flob', 'read'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/furb', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/foo', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/bar', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/bar/something.jpg', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/flob', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/furb', 'write'));
     });
 
     it('test hasPermissions2', async () => {
-      const users = [{orgs: [{orgIdent: '2345B0EA551D747', groups: [{groupName: '8080'}]}]}];
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '8080' }] }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/test');
 
-      assert(hasPermission({users, org: 'test', key: '/test', aclCtx}, 'test', 'write'));
-      assert(hasPermission({users, org: 'test', key: '/test', aclCtx}, 'test', 'read'));
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, 'test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, 'test', 'read'));
+    });
+
+    it('test hasPermissions2a', async () => {
+      const users = [{ orgs: [{ orgIdent: '2345B0ea551D747', groups: [{ groupName: '8080' }] }] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/test');
+
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, '/test', 'read'));
+    });
+
+    it('test hasPermissions2b', async () => {
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '8080' }] }] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/test');
+
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, '/tar/abc', 'write'));
+      assert(hasPermission({
+        users, org: 'test', key: '/test', aclCtx,
+      }, '/tar/abc', 'read'));
     });
 
     it('test hasPermissions3', async () => {
       const key = '/test';
-      const users = [{orgs: [{orgIdent: '2345B0EA551D747', groups: [{groupName: '4711'},{groupName: '8080'}]}]}];
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '4711' }, { groupName: '8080' }] }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, key);
 
-      assert(hasPermission({users, org: 'test', aclCtx, key}, '/test', 'read'));
-      assert(hasPermission({users, org: 'test', aclCtx, key}, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
     });
 
     it('test hasPermissions4', async () => {
       const key = '';
-      const users = [{orgs: []}];
+      const users = [{ orgs: [] }];
       const aclCtx = await getAclCtx(env2, 'test', users, key);
 
-      assert(!hasPermission({users, org: 'test', aclCtx, key}, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
     });
 
     it('test hasPermissions5', async () => {
       const key = '';
-      const users = [{orgs: [{ orgIdent: '123' }]}];
+      const users = [{ orgs: [{ orgIdent: '123' }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, key);
 
-      assert(hasPermission({users, org: 'test', aclCtx, key}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key}, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
     });
 
     it('test hasPermissions6', async () => {
-      const users = [{email: 'joe@bloggs.org', orgs: []}];
+      const users = [{ email: 'joe@bloggs.org', orgs: [] }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/test');
 
-      assert(hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'write'));
-      assert(hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'write'));
+    });
+
+    it('test hasPermissions7', async () => {
+      const users = [{ email: 'JOE@BLOGGS.ORG', orgs: [] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/test');
+
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/x', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/x', 'write'));
+    });
+
+    it('test hasPermissions8', async () => {
+      const users = [{ email: 'mel@bloggs.org', orgs: [] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/test');
+
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/x', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/x', 'write'));
     });
 
     it('test trace information', async () => {
-      const users = [{email: 'joe@bloggs.org', orgs: [{orgIdent: '2345B0EA551D747', groups: [{groupName: '4711'}]}]}];
+      const users = [{ email: 'joe@bloggs.org', orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '4711' }] }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/bar/blah.html');
       const trace = aclCtx.actionTrace;
 
       assert.strictEqual(2, trace.length);
-      const emailTraceIdx = trace[0].group === 'joe@bloggs.org' ? 0 : 1
+      const emailTraceIdx = trace[0].group === 'joe@bloggs.org' ? 0 : 1;
       const groupTraceIdx = 1 - emailTraceIdx;
-      assert.deepStrictEqual({group: 'joe@bloggs.org', path: '/**', actions: ['read']}, trace[emailTraceIdx]);
-      assert.deepStrictEqual(
-        {
-          group: '2345B0EA551D747/4711',
-          path: '/bar/+**',
-          actions: [ 'read', 'write' ]
-        }, trace[groupTraceIdx]);
+      assert.deepStrictEqual({ group: 'joe@bloggs.org', path: '/**', actions: ['read'] }, trace[emailTraceIdx]);
+      assert.deepStrictEqual({
+        group: '2345b0ea551d747/4711',
+        path: '/bar/+**',
+        actions: ['read', 'write'],
+      }, trace[groupTraceIdx]);
+    });
+
+    it('test trace information2', async () => {
+      const users = [{ email: 'MEL@BLOGGS.ORG', orgs: [{ orgIdent: 'abcd', groups: [{ groupName: '1234' }] }] }];
+      const aclCtx = await getAclCtx(env2, 'test', users, '/bar/blah.html');
+      const trace = aclCtx.actionTrace;
+
+      assert.deepStrictEqual([{ group: 'mel@bloggs.org', path: '/**', actions: ['read'] }], trace);
     });
 
     it('test CONFIG api', async () => {
-      const users = [{ orgs: [{ orgIdent: "123" }]}];
+      const users = [{ orgs: [{ orgIdent: '123' }] }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/', 'config');
 
-      assert(hasPermission({users, org: 'test', aclCtx, key: ''}, 'CONFIG', 'write', true));
-      assert(hasPermission({users, org: 'test', aclCtx, key: '/somewhere'}, 'CONFIG', 'write', true));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, 'CONFIG', 'write', true));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '/somewhere',
+      }, 'CONFIG', 'write', true));
     });
 
     it('test CONFIG always has read permission', async () => {
-      const users = [{email: "blah@foo.org"}];
+      const users = [{ email: 'blah@foo.org' }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/', 'config');
       assert(aclCtx.actionSet.has('read'));
     });
 
     it('test versionsource api always has read permission', async () => {
-      const users = [{email: "blah@foo.org"}];
+      const users = [{ email: 'blah@foo.org' }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/', 'versionsource');
       assert(aclCtx.actionSet.has('read'));
     });
 
     it('test versionsource api grants read permission even without explicit permissions', async () => {
-      const users = [{email: "unauthorized@example.com"}];
+      const users = [{ email: 'unauthorized@example.com' }];
       const aclCtx = await getAclCtx(env2, 'test', users, '/restricted', 'versionsource');
       assert(aclCtx.actionSet.has('read'));
       assert(!aclCtx.actionSet.has('write'));
+    });
+
+    it('configPermissionPath maps a config request to its keyword', () => {
+      // Org config (no site) -> the CONFIG keyword.
+      assert.strictEqual(configPermissionPath({}), 'CONFIG');
+      assert.strictEqual(configPermissionPath({ key: '' }), 'CONFIG');
+      // Site config -> /{site}/CONFIG, derived from the key. (daCtx.site is undefined
+      // for the bare /config/{org}/{site} URL, so the key is the source of truth.)
+      assert.strictEqual(configPermissionPath({ key: 'mysite' }), '/mysite/CONFIG');
+      assert.strictEqual(
+        configPermissionPath({ key: 'mysite/public/config.json' }),
+        '/mysite/CONFIG',
+      );
+    });
+
+    it('site config permission is granted by the site keyword or a site wildcard', async () => {
+      // Building blocks for the union model: the route grants config access if the user
+      // matches the /{site}/CONFIG keyword OR the org CONFIG keyword (see config route).
+      const siteConfig = {
+        test: {
+          ':type': 'sheet',
+          ':sheetname': 'permissions',
+          data: [
+            { path: '/mysite/CONFIG', groups: 'reader@bloggs.org', actions: 'read' },
+            { path: '/mysite/+**', groups: 'plus@bloggs.org', actions: 'read' },
+            { path: '/mysite/**', groups: 'star@bloggs.org', actions: 'write' },
+            { path: '/mysite/CONFIG', groups: 'admin@bloggs.org', actions: 'write' },
+          ],
+        },
+      };
+      const siteEnv = { DA_CONFIG: { get: (name) => siteConfig[name] } };
+
+      // A bare /config/{org}/{site} request: key is the site, daCtx.site absent.
+      const ctxFor = async (users) => {
+        const aclCtx = await getAclCtx(siteEnv, 'test', users, 'mysite', 'config');
+        return {
+          users, org: 'test', aclCtx, key: 'mysite',
+        };
+      };
+      const siteKey = '/mysite/CONFIG';
+
+      // An explicit /mysite/CONFIG read rule grants read but not write.
+      const reader = await ctxFor([{ email: 'reader@bloggs.org' }]);
+      assert(hasPermission(reader, siteKey, 'read', true));
+      assert(!hasPermission(reader, siteKey, 'write', true));
+
+      // A /mysite/+** read wildcard matches the site keyword.
+      const plus = await ctxFor([{ email: 'plus@bloggs.org' }]);
+      assert(hasPermission(plus, siteKey, 'read', true));
+      assert(!hasPermission(plus, siteKey, 'write', true));
+
+      // A /mysite/** write wildcard grants read but NOT write on the site keyword: site
+      // write access must not implicitly unlock config write, only an explicit CONFIG
+      // rule can grant that.
+      const star = await ctxFor([{ email: 'star@bloggs.org' }]);
+      assert(hasPermission(star, siteKey, 'read', true));
+      assert(!hasPermission(star, siteKey, 'write', true));
+
+      // An explicit `write` rule on /mysite/CONFIG itself still grants write.
+      const admin = await ctxFor([{ email: 'admin@bloggs.org' }]);
+      assert(hasPermission(admin, siteKey, 'read', true));
+      assert(hasPermission(admin, siteKey, 'write', true));
+    });
+
+    it('getAclCtx actionSet for a config request includes org CONFIG fallback actions', async () => {
+      // Regression test: the cached actionSet built by getAclCtx() for api === 'config'
+      // used to only look up the site-specific /{site}/CONFIG keyword, never the
+      // org-level CONFIG keyword. Since this actionSet is what gets exposed to clients
+      // via the X-da-actions/X-da-child-actions headers (see daResp.js), a user who only
+      // holds the org-level CONFIG rule would pass the real write check in postConfig
+      // (hasConfigPermission ORs both keywords) but the header would still say
+      // read-only, permanently locking the config editor UI once the doc exists.
+      const orgOnlyConfig = {
+        test: {
+          ':type': 'sheet',
+          ':sheetname': 'permissions',
+          data: [
+            { path: 'CONFIG', groups: 'orgadmin@bloggs.org', actions: 'write' },
+          ],
+        },
+      };
+      const orgOnlyEnv = { DA_CONFIG: { get: (name) => orgOnlyConfig[name] } };
+      const users = [{ email: 'orgadmin@bloggs.org' }];
+
+      const aclCtx = await getAclCtx(orgOnlyEnv, 'test', users, 'mysite', 'config');
+      assert(aclCtx.actionSet.has('read'));
+      assert(aclCtx.actionSet.has('write'));
+    });
+
+    it('test DA_OPS_IMS_ORG permissions', async () => {
+      const opsOrg = 'MyOpsOrg';
+      const envOps = {
+        ...env2,
+        DA_OPS_IMS_ORG: opsOrg,
+      };
+
+      // User in the OPS ORG
+      const users = [{ orgs: [{ orgIdent: opsOrg }] }];
+      const aclCtx = await getAclCtx(envOps, 'test', users, '/', 'config');
+
+      // Should have write permission on CONFIG because of DA_OPS_IMS_ORG injection
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, 'CONFIG', 'write', true));
+
+      // Should have write permission on / because of DA_OPS_IMS_ORG injection (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/', 'write'));
+
+      // Should have write permission on path because of DA_OPS_IMS_ORG injection (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/some/deep/path', 'write'));
+    });
+
+    it('test DA_OPS_IMS_BOT_EMAIL permissions', async () => {
+      const botEmail = 'da-ops-bot@adobe.com';
+      const envBot = {
+        ...env2,
+        DA_OPS_IMS_BOT_EMAIL: botEmail,
+      };
+
+      // Bot user identified solely by email — no orgs membership at all.
+      // This is the substantive difference from the DA_OPS_IMS_ORG test:
+      // the bearer is matched on email, independent of IMS org membership.
+      const users = [{ email: botEmail, orgs: [] }];
+      const aclCtx = await getAclCtx(envBot, 'test', users, '/', 'config');
+
+      // Should have write permission on CONFIG because of DA_OPS_IMS_BOT_EMAIL injection
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, 'CONFIG', 'write', true));
+
+      // Should have write permission on / because of DA_OPS_IMS_BOT_EMAIL injection
+      // (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/', 'write'));
+
+      // Should have write permission on path because of DA_OPS_IMS_BOT_EMAIL injection
+      // (path: '/ + **')
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/some/deep/path', 'write'));
+
+      // A different email must NOT inherit bot permissions — the rule matches
+      // on the specific email, not on "any user when DA_OPS_IMS_BOT_EMAIL is set".
+      const otherUsers = [{ email: 'not-the-bot@adobe.com', orgs: [] }];
+      const otherCtx = await getAclCtx(envBot, 'test', otherUsers, '/', 'config');
+      assert(!hasPermission({
+        users: otherUsers, org: 'test', aclCtx: otherCtx, key: '',
+      }, '/', 'write'));
+    });
+
+    it('returns empty action set when DA_CONFIG KV GET throws 414 key-too-long error', async () => {
+      // IMS auth redirect fragments (access_token=..., ld_hash=...) leak into the URL path,
+      // producing an org segment >512 bytes. KV rejects the lookup with a 414 error;
+      // without a guard this unhandled exception propagates to a 500 response.
+      const longOrg = 'a'.repeat(513);
+      const kv414Error = new Error(
+        `KV GET failed: 414 UTF-8 encoded length of ${longOrg.length} exceeds key length limit of 512.`,
+      );
+      const failEnv = {
+        DA_CONFIG: {
+          get: () => {
+            throw kv414Error;
+          },
+        },
+      };
+      const users = [{ email: 'user@example.com' }];
+      const aclCtx = await getAclCtx(failEnv, longOrg, users, '/test');
+      assert.strictEqual(aclCtx.actionSet.size, 0, 'oversized org name must produce empty action set, not throw');
     });
   });
 
   describe('persmissions single sheet', () => {
     const DA_CONFIG = {
-      'test': {
-        "data": [
+      test: {
+        data: [
           {
-            "path": "/**",
-            "groups": "2345B0EA551D747/4711,123,joe@bloggs.org",
-            "actions": "read",
+            path: '/**',
+            groups: '2345B0EA551D747/4711,123,joe@bloggs.org',
+            actions: 'read',
           },
           {
-            "path": "/**",
-            "groups": "2345B0EA551D747/8080",
-            "actions": "write",
+            path: '/**',
+            groups: '2345B0EA551D747/8080',
+            actions: 'write',
           },
           {
-            "path": "/foo",
-            "groups": "2345B0EA551D747/4711",
-            "actions": "write",
+            path: '/foo',
+            groups: '2345B0EA551D747/4711',
+            actions: 'write',
           },
           {
-            "path": "/bar/ + **",
-            "groups": "2345B0EA551D747/4711",
-            "actions": "write",
+            path: '/bar/ + **',
+            groups: '2345B0EA551D747/4711',
+            actions: 'write',
           },
           {
-            "path": "/",
-            "groups": "2345B0EA551D747/4711",
-            "actions": "write",
+            path: '/',
+            groups: '2345B0EA551D747/4711',
+            actions: 'write',
           },
           {
-            "path": "/furb/",
-            "groups": "2345B0EA551D747/4711",
-            "actions": "write",
+            path: '/furb/',
+            groups: '2345B0EA551D747/4711',
+            actions: 'write',
+          },
+          {
+            path: 'CONFIG',
+            groups: 'read-first@bloggs.org',
+            actions: 'read',
+          },
+          {
+            path: 'CONFIG',
+            groups: 'read-first@bloggs.org',
+            actions: 'write',
+          },
+          {
+            path: '/test',
+            groups: 'read-first@bloggs.org',
+            actions: 'read',
+          },
+          {
+            path: '/test',
+            groups: 'read-first@bloggs.org',
+            actions: 'write',
+          },
+          {
+            path: 'CONFIG',
+            groups: 'write-first@bloggs.org',
+            actions: 'write',
+          },
+          {
+            path: 'CONFIG',
+            groups: 'write-first@bloggs.org',
+            actions: 'read',
+          },
+          {
+            path: '/test',
+            groups: 'write-first@bloggs.org',
+            actions: 'write',
+          },
+          {
+            path: '/test',
+            groups: 'write-first@bloggs.org',
+            actions: 'read',
           },
         ],
-        ":type": "sheet",
-        ":sheetname": "permissions",
-      }
+        ':type': 'sheet',
+        ':sheetname': 'permissions',
+      },
     };
 
     const env = {
       DA_CONFIG: {
-        get: (name) => {
-          return DA_CONFIG[name];
-        },
-      }
+        get: (name) => DA_CONFIG[name],
+      },
     };
 
     it('test anonymous permissions', async () => {
-      const users = [{email: 'anonymous'}];
+      const users = [{ email: 'anonymous' }];
       const aclCtx = await getAclCtx(env, 'test', users, '/test');
 
-      assert(!hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: ''}, '/test', 'write'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key: '/test'}, '/test', 'write'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '',
+      }, '/test', 'write'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key: '/test',
+      }, '/test', 'write'));
     });
 
     it('test hasPermissions', async () => {
       const key = '';
-      const users = [{orgs: [{orgIdent: '2345B0EA551D747', groups: [{groupName: '4711'}]}]}];
+      const users = [{ orgs: [{ orgIdent: '2345B0EA551D747', groups: [{ groupName: '4711' }] }] }];
       const aclCtx = await getAclCtx(env, 'test', users, key);
 
-      assert(hasPermission({users, org: 'test', aclCtx, key}, '/test', 'read'));
-      assert(!hasPermission({users, org: 'test', aclCtx, key}, '/test', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/foo', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/bar', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/bar/something.jpg', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/', 'write'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/flob', 'read'));
-      assert(hasPermission({ users, org: 'test', aclCtx, key}, '/furb', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(!hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/foo', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/bar', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/bar/something.jpg', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/flob', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/furb', 'write'));
+    });
+
+    it('test hasPermissions if read and write user', async () => {
+      const key = '';
+      const users = [{ email: 'read-first@bloggs.org' }];
+      const aclCtx = await getAclCtx(env, 'test', users, key);
+
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, 'CONFIG', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, 'CONFIG', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
+    });
+
+    it('test hasPermissions if write and read user', async () => {
+      const key = '';
+      const users = [{ email: 'write-first@bloggs.org' }];
+      const aclCtx = await getAclCtx(env, 'test', users, key);
+
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, 'CONFIG', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, 'CONFIG', 'write'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'read'));
+      assert(hasPermission({
+        users, org: 'test', aclCtx, key,
+      }, '/test', 'write'));
     });
   });
 
@@ -400,6 +889,7 @@ describe('DA auth', () => {
   });
 
   it('test getAclCtx missing props2', async () => {
+    // eslint-disable-next-line consistent-return
     const cfgGet = (o, t) => {
       if ((o === 'myorg') && (t.type === 'json')) {
         return {};
@@ -415,9 +905,10 @@ describe('DA auth', () => {
   });
 
   it('test getAclCtx missing props3', async () => {
+    // eslint-disable-next-line consistent-return
     const cfgGet = (o, t) => {
       if ((o === 'someorg') && (t.type === 'json')) {
-        return { permissions: {}};
+        return { permissions: {} };
       }
     };
     const DA_CONFIG = { get: cfgGet };
@@ -432,6 +923,7 @@ describe('DA auth', () => {
   it('test incorrect props doesnt break things', async () => {
     const data = [{ groups: 'abc', actions: 'read' }];
     const permissions = { data };
+    // eslint-disable-next-line consistent-return
     const cfgGet = (o, t) => {
       if ((o === 'someorg') && (t.type === 'json')) {
         return { permissions };
@@ -448,6 +940,7 @@ describe('DA auth', () => {
   it('test incorrect props doesnt break things', async () => {
     const data = [{ path: '/abc', actions: 'read' }];
     const permissions = { data };
+    // eslint-disable-next-line consistent-return
     const cfgGet = (o, t) => {
       if ((o === 'someorg') && (t.type === 'json')) {
         return { permissions };
@@ -464,6 +957,7 @@ describe('DA auth', () => {
   it('test correct props', async () => {
     const data = [{ path: '/abc', groups: 'a ha, b hoo', actions: 'read' }];
     const permissions = { data };
+    // eslint-disable-next-line consistent-return
     const cfgGet = (o, t) => {
       if ((o === 'someorg') && (t.type === 'json')) {
         return { permissions };
@@ -491,12 +985,12 @@ describe('DA auth', () => {
   describe('ACL context', () => {
     it('get user actions', () => {
       const patharr = [
-        {path: '/da-aem-boilerplate/authtest/sub/sub/**', actions: []},
-        {path: '/da-aem-boilerplate/authtest/sub/**', actions: ['read', 'write']},
-        {path: '/da-aem-boilerplate/authtest/**', actions: ['read']},
-        {path: '/**', actions: ['read', 'write']},
-        {path: '/', actions: ['read', 'write']},
-        {path: 'CONFIG', actions: ['read']},
+        { path: '/da-aem-boilerplate/authtest/sub/sub/**', actions: [] },
+        { path: '/da-aem-boilerplate/authtest/sub/**', actions: ['read', 'write'] },
+        { path: '/da-aem-boilerplate/authtest/**', actions: ['read'] },
+        { path: '/**', actions: ['read', 'write'] },
+        { path: '/', actions: ['read', 'write'] },
+        { path: 'CONFIG', actions: ['read'] },
       ];
 
       const pathlookup = new Map();
@@ -507,37 +1001,47 @@ describe('DA auth', () => {
         ident: 'AAAA@bbb.e',
       };
 
-      assert.deepStrictEqual(['read', 'write'],
-        [...getUserActions(pathlookup, user, '/').actions]);
-      assert.deepStrictEqual(['read'],
-        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/sub').actions]);
-      assert.deepStrictEqual(['read'],
-        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/q.html').actions]);
-      assert.deepStrictEqual(['read', 'write'],
-        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/sub/sub').actions]);
-      assert.deepStrictEqual(['read'],
-        [...getUserActions(pathlookup, user, 'CONFIG').actions]);
+      assert.deepStrictEqual(
+        ['read', 'write'],
+        [...getUserActions(pathlookup, user, '/').actions],
+      );
+      assert.deepStrictEqual(
+        ['read'],
+        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/sub').actions],
+      );
+      assert.deepStrictEqual(
+        ['read'],
+        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/q.html').actions],
+      );
+      assert.deepStrictEqual(
+        ['read', 'write'],
+        [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/sub/sub').actions],
+      );
+      assert.deepStrictEqual(
+        ['read'],
+        [...getUserActions(pathlookup, user, 'CONFIG').actions],
+      );
     });
   });
 
   it('get user actions2', () => {
     const patharr = [
-      {path: '/da-aem-boilerplate/**', actions: ['read']},
-      {path: '/da-aem-boilerplate', actions: ['read']},
-      {path: '/somewhere', actions: ['read']},
-      {path: '/foobar/+**', actions: []},
-      {path: '/**', actions: ['read', 'write']},
-      {path: '/', actions: ['read', 'write']},
+      { path: '/da-aem-boilerplate/**', actions: ['read'] },
+      { path: '/da-aem-boilerplate', actions: ['read'] },
+      { path: '/somewhere', actions: ['read'] },
+      { path: '/foobar/+**', actions: [] },
+      { path: '/**', actions: ['read', 'write'] },
+      { path: '/', actions: ['read', 'write'] },
     ];
     const pathlookup = new Map();
     pathlookup.set('joe@acme.com', patharr);
     const patharr2 = [
-      {path: '/da-aem-boilerplate/authtest/myfile', actions: ['read']},
-      {path: '/da-aem-boilerplate/authtest/myother.html', actions: ['read']},
-      {path: '/da-aem-boilerplate/authtest/**', actions: ['read', 'write']},
-      {path: '/**', actions: []},
+      { path: '/da-aem-boilerplate/authtest/myfile', actions: ['read'] },
+      { path: '/da-aem-boilerplate/authtest/myother.html', actions: ['read'] },
+      { path: '/da-aem-boilerplate/authtest/**', actions: ['read', 'write'] },
+      { path: '/**', actions: [] },
     ];
-    pathlookup.set('ABCDEFG/grp1', patharr2);
+    pathlookup.set('abcdefg/grp1', patharr2);
 
     const user = {
       email: 'joe@acme.com',
@@ -545,43 +1049,92 @@ describe('DA auth', () => {
       orgs: [{
         orgName: 'org1',
         orgIdent: 'ABCDEFG',
-        groups: [{ groupName: 'grp1' }]
-      },{
+        groups: [{ groupName: 'grp1' }],
+      }, {
         orgName: 'org2',
         orgIdent: 'ZZZZZZZ',
-        groups: [{ groupName: 'grp2' }]
+        groups: [{ groupName: 'grp2' }],
       }],
     };
-    assert.deepStrictEqual(['read', 'write'],
-      [...getUserActions(pathlookup, user, '/').actions]);
-    assert.deepStrictEqual(['read', 'write'],
-      [...getUserActions(pathlookup, user, '/foo').actions]);
-    assert.deepStrictEqual(['read'],
-      [...getUserActions(pathlookup, user, '/da-aem-boilerplate').actions]);
-    assert.deepStrictEqual(['read'],
-      [...getUserActions(pathlookup, user, '/somewhere').actions]);
-    assert.deepStrictEqual(['read', 'write'],
-      [...getUserActions(pathlookup, user, '/somewhere/else').actions]);
-    assert.deepStrictEqual([],
-      [...getUserActions(pathlookup, user, '/foobar').actions]);
-    assert.deepStrictEqual([],
-      [...getUserActions(pathlookup, user, '/foobar/har').actions]);
-    assert.deepStrictEqual(['read'],
-      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/myfile.html').actions]);
-    assert.deepStrictEqual(['read'],
-      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/myother.html').actions]);
-    assert.deepStrictEqual(['read', 'write'],
-      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/blah').actions]);
+    assert.deepStrictEqual(
+      ['read', 'write'],
+      [...getUserActions(pathlookup, user, '/').actions],
+    );
+    assert.deepStrictEqual(
+      ['read', 'write'],
+      [...getUserActions(pathlookup, user, '/foo').actions],
+    );
+    assert.deepStrictEqual(
+      ['read'],
+      [...getUserActions(pathlookup, user, '/da-aem-boilerplate').actions],
+    );
+    assert.deepStrictEqual(
+      ['read'],
+      [...getUserActions(pathlookup, user, '/somewhere').actions],
+    );
+    assert.deepStrictEqual(
+      ['read', 'write'],
+      [...getUserActions(pathlookup, user, '/somewhere/else').actions],
+    );
+    assert.deepStrictEqual(
+      [],
+      [...getUserActions(pathlookup, user, '/foobar').actions],
+    );
+    assert.deepStrictEqual(
+      [],
+      [...getUserActions(pathlookup, user, '/foobar/har').actions],
+    );
+    assert.deepStrictEqual(
+      ['read'],
+      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/myfile.html').actions],
+    );
+    assert.deepStrictEqual(
+      ['read'],
+      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/myother.html').actions],
+    );
+    assert.deepStrictEqual(
+      ['read', 'write'],
+      [...getUserActions(pathlookup, user, '/da-aem-boilerplate/authtest/blah').actions],
+    );
+  });
+
+  it('page-scoped grant also covers the page\'s dot asset folder', () => {
+    const patharr = [
+      {
+        path: '/westernsydney/learning-futures/+**',
+        actions: ['write'],
+      },
+      {
+        path: '/westernsydney/learning-futures.html',
+        actions: ['write'],
+      },
+    ];
+    const pathlookup = new Map();
+    pathlookup.set('joe@acme.com', patharr);
+
+    const user = {
+      email: 'joe@acme.com',
+      ident: 'AAAA@bbb.e',
+    };
+
+    assert.deepStrictEqual(
+      ['write'],
+      [...getUserActions(pathlookup, user, '/westernsydney/learning-futures.html').actions],
+    );
+    assert.deepStrictEqual(
+      ['write'],
+      [...getUserActions(pathlookup, user, '/westernsydney/.learning-futures/Parramatta.jpg').actions],
+    );
   });
 
   it('test logout', async () => {
     const deleteCalled = [];
     const deleteFunc = async (id) => {
       deleteCalled.push(id);
-    }
-    const DA_AUTH = { delete: deleteFunc};
+    };
+    const DA_AUTH = { delete: deleteFunc };
     const env = { DA_AUTH };
-    const daCtx = { users: [{ ident: '1234@a'}, { ident: '5678@b'}] };
+    const daCtx = { users: [{ ident: '1234@a' }, { ident: '5678@b' }] };
 
     const resp = await logout({ env, daCtx });
     assert.deepStrictEqual(new Set(['1234@a', '5678@b']), new Set(deleteCalled));
@@ -595,98 +1148,94 @@ describe('DA auth', () => {
       orgs: [{
         orgName: 'org1',
         orgIdent: 'ABCDEFG',
-        groups: [{ groupName: 'grp1' }]
-      },{
+        groups: [{ groupName: 'grp1' }],
+      }, {
         orgName: 'org2',
         orgIdent: 'HIJKLMN',
-        groups: [{ groupName: 'grp2' }]
-      }]
+        groups: [{ groupName: 'grp2' }],
+      }],
     };
     const pathLookup = new Map();
-    pathLookup.set('ABCDEFG', [{ident: 'ABCDEFG', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('ABCDEFG/grp1', [{ident: 'ABCDEFG/grp1', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('ABCDEFG/111', [{ident: 'ABCDEFG/111', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('ABCDEFG/foo@bar.org', [{ident: 'ABCDEFG/foo@bar.org', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('org1/grp1', [{ident: 'org1/grp1', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('org1/111', [{ident: 'org1/111', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('HIJKLMN', [{ident: 'HIJKLMN', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('HIJKLMN/grp2', [{ident: 'HIJKLMN/grp2', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('HIJKLMN/222', [{ident: 'HIJKLMN/222', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('HIJKLMN/foo@bar.org', [{ident: 'HIJKLMN/foo@bar.org', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('org2/grp2', [{ident: 'org2/grp2', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('org2/222', [{ident: 'org2/222', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('foo@bar.org', [{ident: 'foo@bar.org', path: '/xyz', actions: ['read']}]);
-    pathLookup.set('1234@abcd', [{ident: '1234@abcd', path: '/xyz', actions: ['read']}]);
+    pathLookup.set('abcdefg', [{ ident: 'abcdefg', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('abcdefg/grp1', [{ ident: 'abcdefg/grp1', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('abcdefg/111', [{ ident: 'abcdefg/111', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('abcdefg/foo@bar.org', [{ ident: 'abcdefg/foo@bar.org', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('org1/grp1', [{ ident: 'org1/grp1', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('org1/111', [{ ident: 'org1/111', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('hijklmn', [{ ident: 'hijklmn', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('hijklmn/grp2', [{ ident: 'hijklmn/grp2', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('hijklmn/222', [{ ident: 'hijklmn/222', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('hijklmn/foo@bar.org', [{ ident: 'hijklmn/foo@bar.org', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('org2/grp2', [{ ident: 'org2/grp2', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('org2/222', [{ ident: 'org2/222', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('foo@bar.org', [{ ident: 'foo@bar.org', path: '/xyz', actions: ['read'] }]);
+    pathLookup.set('1234@abcd', [{ ident: '1234@abcd', path: '/xyz', actions: ['read'] }]);
     const res = getUserActions(pathLookup, user, '/xyz');
 
     const matchedIds = res.trace.map((r) => r.ident);
     assert.strictEqual(7, matchedIds.length);
-    assert(matchedIds.includes('ABCDEFG'));
-    assert(matchedIds.includes('ABCDEFG/grp1'));
-    assert(matchedIds.includes('ABCDEFG/foo@bar.org'));
-    assert(matchedIds.includes('HIJKLMN'));
-    assert(matchedIds.includes('HIJKLMN/grp2'));
-    assert(matchedIds.includes('HIJKLMN/foo@bar.org'));
+    assert(matchedIds.includes('abcdefg'));
+    assert(matchedIds.includes('abcdefg/grp1'));
+    assert(matchedIds.includes('abcdefg/foo@bar.org'));
+    assert(matchedIds.includes('hijklmn'));
+    assert(matchedIds.includes('hijklmn/grp2'));
+    assert(matchedIds.includes('hijklmn/foo@bar.org'));
     assert(matchedIds.includes('foo@bar.org'));
   });
-
-  function hasRule(rules, path, action) {
-    return rules.some((r) => r.path === path && r.actions.includes(action));
-  }
 
   it('test get child rules', async () => {
     const pathLookup = new Map();
     pathLookup.set('a@foo.org', [
-      {path: '/**', actions: ['read']},
-      {path: '/something', actions: ['write']},
-      {path: '/foo/bar', actions: ['write']},
-      {path: '/blah/+**', actions: ['write']},
-      {path: '/blah/haha', actions: ['read']},
-      {path: '/blah/hoho/**', actions: ['read']},
-      {path: '/blah/hoho/hihi', actions: ['read']},
-      {path: '/hello/+**', actions: ['read','write']},
+      { path: '/**', actions: ['read'] },
+      { path: '/something', actions: ['write'] },
+      { path: '/foo/bar', actions: ['write'] },
+      { path: '/blah/+**', actions: ['write'] },
+      { path: '/blah/haha', actions: ['read'] },
+      { path: '/blah/hoho/**', actions: ['read'] },
+      { path: '/blah/hoho/hihi', actions: ['read'] },
+      { path: '/hello/+**', actions: ['read', 'write'] },
     ]);
-    pathLookup.set('ABCDEF', [
-      {path: '/blah/hohoho', actions: ['read']},
-      {path: '/blah/+**', actions: ['read']},
-      {path: '/hello/+**', actions: ['read']},
+    pathLookup.set('abcdef', [
+      { path: '/blah/hohoho', actions: ['read'] },
+      { path: '/blah/+**', actions: ['read'] },
+      { path: '/hello/+**', actions: ['read'] },
     ]);
     pathLookup.forEach((value) => value.sort(pathSorter));
 
     const aclCtx = { pathLookup };
-    const daCtx = { users: [{ email: 'a@foo.org', orgs: [{orgIdent: 'ABCDEF'}]}], aclCtx, key: '/blah' };
+    const daCtx = { users: [{ email: 'a@foo.org', orgs: [{ orgIdent: 'ABCDEF' }] }], aclCtx, key: '/blah' };
     getChildRules(daCtx);
     const rules = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules.length);
     assert(rules[0] === '/blah/**=read,write' || rules[0] === '/blah/**=write,read');
 
     delete daCtx.aclCtx.childRules;
-    getChildRules({...daCtx, key: '/foo/'});
+    getChildRules({ ...daCtx, key: '/foo/' });
     const rules2 = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules2.length);
     assert.strictEqual('/foo/**=read', rules2[0]);
 
     delete daCtx.aclCtx.childRules;
-    getChildRules({...daCtx, key: '/something'});
+    getChildRules({ ...daCtx, key: '/something' });
     const rules3 = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules3.length);
     assert.strictEqual('/something/**=read', rules3[0]);
 
     delete daCtx.aclCtx.childRules;
-    getChildRules({...daCtx, key: '/blah/yee/haa'});
+    getChildRules({ ...daCtx, key: '/blah/yee/haa' });
     const rules4 = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules4.length);
     assert(rules4[0] === '/blah/yee/haa/**=read,write' || rules4[0] === '/blah/yee/haa/**=write,read');
 
     delete daCtx.aclCtx.childRules;
-    const daCtx2 = { users: [{email: 'a@foo.org', groups: []}], aclCtx, key: '/blah' };
+    const daCtx2 = { users: [{ email: 'a@foo.org', groups: [] }], aclCtx, key: '/blah' };
     getChildRules(daCtx2);
     const rules5 = daCtx2.aclCtx.childRules;
     assert.strictEqual(1, rules5.length);
     assert.strictEqual('/blah/**=write', rules5[0]);
 
     delete daCtx.aclCtx.childRules;
-    const users = [{email: 'a@foo.org', orgs: []}, {email: 'blah@foo.org', orgs: [{orgIdent: 'ABCDEF'}]}];
+    const users = [{ email: 'a@foo.org', orgs: [] }, { email: 'blah@foo.org', orgs: [{ orgIdent: 'ABCDEF' }] }];
     const daCtx3 = { users, aclCtx, key: '/blah' };
     getChildRules(daCtx3);
     const rules6 = daCtx3.aclCtx.childRules;
@@ -704,10 +1253,136 @@ describe('DA auth', () => {
   it('test get child rules when there are no acls', async () => {
     const pathLookup = new Map();
     const aclCtx = { pathLookup };
-    const daCtx = { users: [{email: 'anonymous'}], aclCtx, key: '/foo' };
+    const daCtx = { users: [{ email: 'anonymous' }], aclCtx, key: '/foo' };
     getChildRules(daCtx);
     const rules = daCtx.aclCtx.childRules;
     assert.strictEqual(1, rules.length);
     assert(rules[0] === '/foo/**=read,write' || rules[0] === '/foo/**=write,read');
+  });
+
+  describe('hasDescendantPermission (ancestor listing)', async () => {
+    const DA_CONFIG = {
+      test: {
+        ':type': 'multi-sheet',
+        permissions: {
+          data: [
+            // Only a deep exact page is granted - the reported customer bug.
+            { path: '/folder2/a/b/c', groups: 'deep@bloggs.org', actions: 'read' },
+            // A folder granted via a recursive-descendants-only wildcard.
+            { path: '/folder/**', groups: 'wild@bloggs.org', actions: 'read' },
+            // A folder granted via +** (folder itself and descendants), write-only
+            // (write implies read).
+            { path: '/team/proj/+**', groups: 'plus@bloggs.org', actions: 'write' },
+            // A user with both a wildcard folder and a deep exact page - should
+            // reveal both "folder" and "folder2" when listing "/".
+            { path: '/folder/**', groups: 'both@bloggs.org', actions: 'read' },
+            { path: '/folder2/a/b/c', groups: 'both@bloggs.org', actions: 'read' },
+            // A user who shares one path with another co-author (AND semantics).
+            { path: '/shared/**', groups: 'sharedA@bloggs.org', actions: 'read' },
+            { path: '/shared/**', groups: 'sharedB@bloggs.org', actions: 'read' },
+            // Unrelated grants that must not leak directory visibility.
+            { path: '/other/x', groups: 'other@bloggs.org', actions: 'write' },
+            { path: 'CONFIG', groups: 'cfgonly@bloggs.org', actions: 'write' },
+            { path: '/site/CONFIG', groups: 'sitecfg@bloggs.org', actions: 'write' },
+          ],
+        },
+      },
+    };
+    const env = { DA_CONFIG: { get: (name) => DA_CONFIG[name] } };
+
+    async function aclCtxFor(...emails) {
+      const users = emails.map((email) => ({ email }));
+      const aclCtx = await getAclCtx(env, 'test', users, '/irrelevant');
+      return { users, aclCtx };
+    }
+
+    it('returns false for a null or undefined path', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      assert(!hasDescendantPermission({ users, aclCtx }, null, 'read'));
+      assert(!hasDescendantPermission({ users, aclCtx }, undefined, 'read'));
+    });
+
+    it('returns true for every ancestor of a deep exact grant, and the exact path itself', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a/b', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2/a/b/c', 'read'));
+      assert(hasDescendantPermission(ctx, 'folder2', 'read'), 'should normalize missing leading slash');
+    });
+
+    it('returns false beyond the exact grant and for unrelated siblings', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      // An exact (non-wildcard) grant does not cover its own children.
+      assert(!hasDescendantPermission(ctx, '/folder2/a/b/c/d', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder3', 'read'));
+      // Prefix-collision guard: "/team" must not match "/teamx".
+      assert(!hasDescendantPermission(ctx, '/foo', 'read'));
+    });
+
+    it('respects the action being checked', async () => {
+      const { users, aclCtx } = await aclCtxFor('deep@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder2', 'write'));
+    });
+
+    it('returns true when the deepest grant is via a recursive wildcard', async () => {
+      const { users, aclCtx } = await aclCtxFor('wild@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folderx', 'read'), 'prefix-collision guard');
+    });
+
+    it('returns true for ancestors of a +** grant', async () => {
+      const { users, aclCtx } = await aclCtxFor('plus@bloggs.org');
+      const ctx = { users, aclCtx };
+      // "/team" and "/team/proj" are ancestors of the granted root and need
+      // this fallback to be listable. "/team/proj/sub" is already directly
+      // covered by hasPermission's forward +** match, so it's out of scope
+      // for this ancestor-only helper (hasPermission is checked first by
+      // callers and would already return true there).
+      assert(hasDescendantPermission(ctx, '/team', 'read'));
+      assert(hasDescendantPermission(ctx, '/team/proj', 'read'));
+      assert(!hasDescendantPermission(ctx, '/teamx', 'read'), 'prefix-collision guard');
+    });
+
+    it('reveals every distinct top-level folder that leads to a grant for the same user', async () => {
+      const { users, aclCtx } = await aclCtxFor('both@bloggs.org');
+      const ctx = { users, aclCtx };
+      assert(hasDescendantPermission(ctx, '/', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder', 'read'));
+      assert(hasDescendantPermission(ctx, '/folder2', 'read'));
+      assert(!hasDescendantPermission(ctx, '/folder3', 'read'));
+    });
+
+    it('requires every co-author to have descendant permission (AND semantics)', async () => {
+      const both = await aclCtxFor('sharedA@bloggs.org', 'sharedB@bloggs.org');
+      assert(hasDescendantPermission(both, '/shared', 'read'));
+
+      const mixed = await aclCtxFor('deep@bloggs.org', 'other@bloggs.org');
+      assert(!hasDescendantPermission(mixed, '/folder2', 'read'), 'other@bloggs.org has no grant there');
+    });
+
+    it('does not leak directory visibility from CONFIG-only grants', async () => {
+      const cfgOnly = await aclCtxFor('cfgonly@bloggs.org');
+      assert(!hasDescendantPermission(cfgOnly, '/', 'read'));
+
+      const siteCfg = await aclCtxFor('sitecfg@bloggs.org');
+      assert(!hasDescendantPermission(siteCfg, '/', 'read'));
+      assert(!hasDescendantPermission(siteCfg, '/site', 'read'));
+    });
+
+    it('returns true unconditionally when there is no ACL config at all', async () => {
+      const openEnv = { DA_CONFIG: { get: () => undefined } };
+      const users = [{ email: 'anyone@bloggs.org' }];
+      const aclCtx = await getAclCtx(openEnv, 'test', users, '/irrelevant');
+      assert(hasDescendantPermission({ users, aclCtx }, '/', 'read'));
+      assert(hasDescendantPermission({ users, aclCtx }, '/anything/at/all', 'read'));
+    });
   });
 });

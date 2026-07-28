@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -33,11 +33,11 @@ export default async function moveObject(env, daCtx, details) {
 
   // The input prefix has a forward slash to prevent (drafts + drafts-new, etc.).
   // Which means the list will only pickup children. This adds to the initial list.
-  const sourceKeys = [details.source];
+  const initialKeys = [details.source];
 
   // Only add .props if the source is a folder
   // Note: this is not guaranteed to exist
-  if (!daCtx.isFile) sourceKeys.push(`${details.source}.props`);
+  if (!daCtx.isFile) initialKeys.push(`${details.source}.props`);
 
   const results = [];
   let ContinuationToken;
@@ -45,12 +45,18 @@ export default async function moveObject(env, daCtx, details) {
   do {
     try {
       const command = new ListObjectsV2Command({ ...input, ContinuationToken });
+      // eslint-disable-next-line no-await-in-loop
       const resp = await client.send(command);
 
       const { Contents = [], NextContinuationToken } = resp;
-      sourceKeys.push(...Contents.map(({ Key }) => Key.replace(`${daCtx.org}/`, '')));
 
-      const movedLoad = sourceKeys
+      // Include the folder object and .props on the first page only to avoid re-processing
+      const pageKeys = [
+        ...(!ContinuationToken ? initialKeys : []),
+        ...Contents.map(({ Key }) => Key.replace(`${daCtx.org}/`, '')),
+      ];
+
+      const movedLoad = pageKeys
         .filter((key) => hasPermission(daCtx, key, 'write'))
         .filter((key) => hasPermission(daCtx, key.replace(details.source, details.destination), 'write'))
         .map(async (key) => {
@@ -66,11 +72,23 @@ export default async function moveObject(env, daCtx, details) {
           return result;
         });
 
-      results.push(...await Promise.all(movedLoad));
+      // eslint-disable-next-line no-await-in-loop
+      const settled = await Promise.allSettled(movedLoad);
+      const failed = settled.filter((r) => r.status === 'rejected');
+      if (failed.length) {
+        failed.forEach((r) => {
+          // eslint-disable-next-line no-console
+          console.error('Move partial failure', r.reason);
+        });
+        return { body: JSON.stringify({ error: 'partial_failure', failed: failed.length }), status: 500, error: failed[0]?.reason?.message };
+      }
+      results.push(...settled.map((r) => r.value));
 
       ContinuationToken = NextContinuationToken;
     } catch (e) {
-      return { body: '', status: 404 };
+      // eslint-disable-next-line no-console
+      console.error('Move failed', e);
+      return { body: JSON.stringify({ error: 'move_failed' }), status: 500, error: e.message };
     }
   } while (ContinuationToken);
 

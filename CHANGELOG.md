@@ -1,0 +1,514 @@
+## [1.13.3](https://github.com/adobe/da-admin/compare/v1.13.2...v1.13.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* log R2 errors on source GET 500s ([#307](https://github.com/adobe/da-admin/issues/307)) ([db8f824](https://github.com/adobe/da-admin/commit/db8f8240ff739b35996125195b78e5aa90e396d7))
+
+## [1.13.2](https://github.com/adobe/da-admin/compare/v1.13.1...v1.13.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* site write access must not implicitly grant CONFIG write ([#306](https://github.com/adobe/da-admin/issues/306)) ([9545ea2](https://github.com/adobe/da-admin/commit/9545ea25068afa04d18eb5bcf38dc8a3d6500c4d))
+
+## [1.13.1](https://github.com/adobe/da-admin/compare/v1.13.0...v1.13.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* reject copy/move destinations in the reserved .da-versions folder ([#303](https://github.com/adobe/da-admin/issues/303)) ([df584e5](https://github.com/adobe/da-admin/commit/df584e57d7e794f604677d1f7feda1b9c3a2bc48)), closes [#301](https://github.com/adobe/da-admin/issues/301) [#302](https://github.com/adobe/da-admin/issues/302)
+
+# [1.13.0](https://github.com/adobe/da-admin/compare/v1.12.4...v1.13.0) (2026-07-17)
+
+
+### Features
+
+* reject a non-UUID guid before it becomes a file id ([#304](https://github.com/adobe/da-admin/issues/304)) ([818c553](https://github.com/adobe/da-admin/commit/818c55346d323c9bb636de725ce47df65403c808))
+
+## [1.12.4](https://github.com/adobe/da-admin/compare/v1.12.3...v1.12.4) (2026-07-16)
+
+
+### Bug Fixes
+
+* block .da-versions access through the generic source/list/delete routes ([#302](https://github.com/adobe/da-admin/issues/302)) ([3d74efa](https://github.com/adobe/da-admin/commit/3d74efa9ed0c7680a43895ac086fd9c8f15432f2))
+
+## [1.12.3](https://github.com/adobe/da-admin/compare/v1.12.2...v1.12.3) (2026-07-14)
+
+
+### Bug Fixes
+
+* reject cross-org copy/move destinations instead of misdelivering ([#301](https://github.com/adobe/da-admin/issues/301)) ([fd7a351](https://github.com/adobe/da-admin/commit/fd7a3511faf98e6282a2d2e88b10b2eb3717970f))
+
+## [1.12.2](https://github.com/adobe/da-admin/compare/v1.12.1...v1.12.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* page-scoped ACL grants also cover the page's dot asset folder ([#300](https://github.com/adobe/da-admin/issues/300)) ([0e95a8e](https://github.com/adobe/da-admin/commit/0e95a8e1fb700c5c849a107b9c96b24277ece2ff))
+
+## [1.12.1](https://github.com/adobe/da-admin/compare/v1.12.0...v1.12.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* **list:** allow listing an ancestor folder when permission is only granted on a descendant ([#299](https://github.com/adobe/da-admin/issues/299)) ([420f664](https://github.com/adobe/da-admin/commit/420f66454cf00e18b3a4d92c071746ef690082bc))
+
+# [1.12.0](https://github.com/adobe/da-admin/compare/v1.11.2...v1.12.0) (2026-07-07)
+
+
+### Features
+
+* **source:** accept raw body PUT/POST for application/json ([#294](https://github.com/adobe/da-admin/issues/294)) ([6d1363c](https://github.com/adobe/da-admin/commit/6d1363c2c905c04f98f835d881ac8121d5cc4e72))
+
+## [1.11.2](https://github.com/adobe/da-admin/compare/v1.11.1...v1.11.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#236](https://github.com/adobe/da-admin/issues/236)) ([f193fbc](https://github.com/adobe/da-admin/commit/f193fbc4c7ac0252ea443a4e440817401df80fdc))
+
+## [1.11.1](https://github.com/adobe/da-admin/compare/v1.11.0...v1.11.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* derive config site from key and let site wildcards govern site config ([#295](https://github.com/adobe/da-admin/issues/295)) ([fd355f3](https://github.com/adobe/da-admin/commit/fd355f39d47ddbf4773e4f0e7c2e270ab5b49e32))
+
+# [1.11.0](https://github.com/adobe/da-admin/compare/v1.10.2...v1.11.0) (2026-06-17)
+
+
+### Features
+
+* add per-site /{site}/CONFIG permission for site config ([#293](https://github.com/adobe/da-admin/issues/293)) ([f9002e9](https://github.com/adobe/da-admin/commit/f9002e931d6666a850ad33aec78de700e992cb84))
+
+## [1.10.2](https://github.com/adobe/da-admin/compare/v1.10.1...v1.10.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* Error when deleting file open in another window ([#259](https://github.com/adobe/da-admin/issues/259)) ([85217c1](https://github.com/adobe/da-admin/commit/85217c1e5b444de6a438cdb7065f741ea5f3f2a7)), closes [#258](https://github.com/adobe/da-admin/issues/258)
+
+## [1.10.1](https://github.com/adobe/da-admin/compare/v1.10.0...v1.10.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* cap putObjectWithVersion retries to prevent runaway workers ([#291](https://github.com/adobe/da-admin/issues/291)) ([fa5dad5](https://github.com/adobe/da-admin/commit/fa5dad560200c52a39c113b7f59117be3ab551f8)), closes [hi#concurrency](https://github.com/hi/issues/concurrency)
+
+# [1.10.0](https://github.com/adobe/da-admin/compare/v1.9.3...v1.10.0) (2026-06-10)
+
+
+### Features
+
+* trigger release ([cc42df6](https://github.com/adobe/da-admin/commit/cc42df6963aef7f85d6ad39e956246c9b66db685))
+
+## [1.9.3](https://github.com/adobe/da-admin/compare/v1.9.2...v1.9.3) (2026-05-29)
+
+
+### Bug Fixes
+
+* **version:** heal ContentType for legacy octet-stream files on labelled version ([#288](https://github.com/adobe/da-admin/issues/288)) ([bf86d40](https://github.com/adobe/da-admin/commit/bf86d4011ef62509d8c7981f502d0b0c74183cc8)), closes [#284](https://github.com/adobe/da-admin/issues/284) [#284](https://github.com/adobe/da-admin/issues/284)
+
+## [1.9.2](https://github.com/adobe/da-admin/compare/v1.9.1...v1.9.2) (2026-05-22)
+
+
+### Bug Fixes
+
+* **version:** log diagnostics on POST /versionsource silent 500 ([#284](https://github.com/adobe/da-admin/issues/284)) ([f06504b](https://github.com/adobe/da-admin/commit/f06504bb1365923dc8d588f60fe9db1d6bfc0b04))
+
+## [1.9.1](https://github.com/adobe/da-admin/compare/v1.9.0...v1.9.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **audit:** grow writeAuditEntry 412 backoff to 6 retries / ~3050 ms ([#282](https://github.com/adobe/da-admin/issues/282)) ([bc49409](https://github.com/adobe/da-admin/commit/bc494095d872f0367a034776e8c8a5e88f284cde)), closes [#277](https://github.com/adobe/da-admin/issues/277)
+
+# [1.9.0](https://github.com/adobe/da-admin/compare/v1.8.2...v1.9.0) (2026-05-20)
+
+
+### Features
+
+* add DA_OPS_IMS_BOT_EMAIL escape hatch for bot write access ([#280](https://github.com/adobe/da-admin/issues/280)) ([faad8c1](https://github.com/adobe/da-admin/commit/faad8c143b0732c83e0e0afb5fbba25b8ef5653c))
+
+## [1.8.2](https://github.com/adobe/da-admin/compare/v1.8.1...v1.8.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **audit:** grow writeAuditEntry 412 backoff to exponential jitter ([#277](https://github.com/adobe/da-admin/issues/277)) ([17aac95](https://github.com/adobe/da-admin/commit/17aac950191d2917cb87e08e11dfaeac4608d561))
+
+## [1.8.1](https://github.com/adobe/da-admin/compare/v1.8.0...v1.8.1) (2026-05-12)
+
+
+### Bug Fixes
+
+* retry on R2 ETag mismatch when client sends If-Match: * ([#276](https://github.com/adobe/da-admin/issues/276)) ([3634d98](https://github.com/adobe/da-admin/commit/3634d98f9b7ff48aab713fa216b0bc77e49f6987))
+
+# [1.8.0](https://github.com/adobe/da-admin/compare/v1.7.3...v1.8.0) (2026-05-07)
+
+
+### Features
+
+* add media route with media bus upload ([#178](https://github.com/adobe/da-admin/issues/178)) ([060765c](https://github.com/adobe/da-admin/commit/060765c73b26ed261341ad5171ead90efa2e5a6f))
+
+## [1.7.3](https://github.com/adobe/da-admin/compare/v1.7.2...v1.7.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **copy:** return 400 instead of 500 when /copy POST body is not form-encoded ([#275](https://github.com/adobe/da-admin/issues/275)) ([a951f0c](https://github.com/adobe/da-admin/commit/a951f0c6ab9ecd0c85bf966fa8bf89f74d5029a2))
+
+## [1.7.2](https://github.com/adobe/da-admin/compare/v1.7.1...v1.7.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* handle NoSuchKey error name in copyFile catch block ([#272](https://github.com/adobe/da-admin/issues/272)) ([939b491](https://github.com/adobe/da-admin/commit/939b49187ac317482406aa946d7b032c5dfa265a))
+* increase writeAuditEntry 412 retries to 5 and remove dead retry loop in put.js ([#274](https://github.com/adobe/da-admin/issues/274)) ([2aca684](https://github.com/adobe/da-admin/commit/2aca684844fff0e8a4f8787f90e2f69a796afbde))
+* return 400 when label is missing in POST /versionsource ([#273](https://github.com/adobe/da-admin/issues/273)) ([36acb2b](https://github.com/adobe/da-admin/commit/36acb2b9f3dffb8c4185da01e7983e79f111d62a))
+
+## [1.7.1](https://github.com/adobe/da-admin/compare/v1.7.0...v1.7.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* handle KV 414 error when IMS auth fragment leaks into org path ([#270](https://github.com/adobe/da-admin/issues/270)) ([db2b4c8](https://github.com/adobe/da-admin/commit/db2b4c8249234eb5c45329629e71bbb7ca1a7efc))
+* treat putVersion 412 as version-already-exists, not failure ([#271](https://github.com/adobe/da-admin/issues/271)) ([e92b916](https://github.com/adobe/da-admin/commit/e92b9166b577caf9ae1ce78c9f96a0927c458d80))
+
+# [1.7.0](https://github.com/adobe/da-admin/compare/v1.6.3...v1.7.0) (2026-04-29)
+
+
+### Features
+
+* add x-error header ([#269](https://github.com/adobe/da-admin/issues/269)) ([9183c18](https://github.com/adobe/da-admin/commit/9183c18e18107079c15bd9d41a44d4f7d30b056b))
+
+## [1.6.3](https://github.com/adobe/da-admin/compare/v1.6.2...v1.6.3) (2026-04-29)
+
+
+### Bug Fixes
+
+* buffer current.body to ArrayBuffer before putVersion to survive SDK retries ([#268](https://github.com/adobe/da-admin/issues/268)) ([47562f1](https://github.com/adobe/da-admin/commit/47562f1f4433269a75f78f14e4d4a52335313898))
+* guard against null body in notifyCollab to prevent move partial_failure ([#267](https://github.com/adobe/da-admin/issues/267)) ([b21c4eb](https://github.com/adobe/da-admin/commit/b21c4ebadafd0a26ff04ad07aff5d5c05b3fe58b))
+
+## [1.6.2](https://github.com/adobe/da-admin/compare/v1.6.1...v1.6.2) (2026-04-29)
+
+
+### Bug Fixes
+
+* consumed body on retry ([#264](https://github.com/adobe/da-admin/issues/264)) ([fffb056](https://github.com/adobe/da-admin/commit/fffb056f63ba064a949c69484d31a3e5c52df6a7))
+* reject expired IMS tokens by comparing expiry in milliseconds ([#265](https://github.com/adobe/da-admin/issues/265)) ([09e44e9](https://github.com/adobe/da-admin/commit/09e44e9debb633f8019e3342977d7a82bc0d991a))
+
+## [1.6.1](https://github.com/adobe/da-admin/compare/v1.6.0...v1.6.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* log errors on move failures so they appear in Cloudflare Logs ([#266](https://github.com/adobe/da-admin/issues/266)) ([84ac28f](https://github.com/adobe/da-admin/commit/84ac28f56bd06fc1d12fbe7899ad0ed96a39190c))
+
+# [1.6.0](https://github.com/adobe/da-admin/compare/v1.5.0...v1.6.0) (2026-04-28)
+
+
+### Features
+
+* no legacy versions support ([#263](https://github.com/adobe/da-admin/issues/263)) ([0d5455c](https://github.com/adobe/da-admin/commit/0d5455cbe8fb4b14677159101df5eb6abaccb4bd))
+
+# [1.5.0](https://github.com/adobe/da-admin/compare/v1.4.0...v1.5.0) (2026-04-27)
+
+
+### Features
+
+* all orgs write to audit.txt ([#262](https://github.com/adobe/da-admin/issues/262)) ([8dc7659](https://github.com/adobe/da-admin/commit/8dc765968a0a10199ba5452ff0ecfffb38dea896))
+
+# [1.4.0](https://github.com/adobe/da-admin/compare/v1.3.1...v1.4.0) (2026-04-23)
+
+
+### Features
+
+* add a retry to compensate R2 transient failure ([#257](https://github.com/adobe/da-admin/issues/257)) ([eb25f6d](https://github.com/adobe/da-admin/commit/eb25f6d258157af0fcfd6bc9219a1f907c211f51))
+
+## [1.3.1](https://github.com/adobe/da-admin/compare/v1.3.0...v1.3.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* normalize charset=utf-8 for text content types and support raw-body HTML PUTs ([#256](https://github.com/adobe/da-admin/issues/256)) ([29b4f4b](https://github.com/adobe/da-admin/commit/29b4f4b4cb35421be1389c3e2f42f1ced82895b2))
+
+# [1.3.0](https://github.com/adobe/da-admin/compare/v1.2.0...v1.3.0) (2026-04-02)
+
+
+### Features
+
+* restructure versions ([#253](https://github.com/adobe/da-admin/issues/253)) ([f583359](https://github.com/adobe/da-admin/commit/f58335943319553726ac9e01a76dd2828ed7ed7a))
+
+# [1.2.0](https://github.com/adobe/da-admin/compare/v1.1.7...v1.2.0) (2026-03-31)
+
+
+### Features
+
+* improve error handling ([#255](https://github.com/adobe/da-admin/issues/255)) ([3fc681c](https://github.com/adobe/da-admin/commit/3fc681c13561d30b5b182c8d1f6ff491b82eea7f))
+
+## [1.1.7](https://github.com/adobe/da-admin/compare/v1.1.6...v1.1.7) (2026-03-12)
+
+
+### Bug Fixes
+
+* **versionsource:** surface version creation failures and fix streaming warning ([#250](https://github.com/adobe/da-admin/issues/250)) ([4ee0dbe](https://github.com/adobe/da-admin/commit/4ee0dbec72a350cb92c2403db58137e7189402c5))
+
+## [1.1.6](https://github.com/adobe/da-admin/compare/v1.1.5...v1.1.6) (2026-02-25)
+
+
+### Bug Fixes
+
+* **auth:** make user identifier comparison case-insensitive ([#246](https://github.com/adobe/da-admin/issues/246)) ([aac2136](https://github.com/adobe/da-admin/commit/aac21366c856cf5cf3c59502768609bfaea6601b))
+
+## [1.1.5](https://github.com/adobe/da-admin/compare/v1.1.4...v1.1.5) (2026-02-18)
+
+
+### Bug Fixes
+
+* allow logout again ([#245](https://github.com/adobe/da-admin/issues/245)) ([3653979](https://github.com/adobe/da-admin/commit/3653979fa3034e7abf4801dad736956eb553a91b)), closes [#232](https://github.com/adobe/da-admin/issues/232)
+
+## [1.1.4](https://github.com/adobe/da-admin/compare/v1.1.3...v1.1.4) (2026-02-18)
+
+
+### Bug Fixes
+
+* api docs by clarifying file extension requirements in API paths ([#242](https://github.com/adobe/da-admin/issues/242)) ([7164ffe](https://github.com/adobe/da-admin/commit/7164ffe7f4500c2090da5388f5bcbeb21d81a3a9)), closes [#129](https://github.com/adobe/da-admin/issues/129)
+
+## [1.1.4](https://github.com/adobe/da-admin/compare/v1.1.3...v1.1.4) (2026-02-10)
+
+
+### Bug Fixes
+
+* api docs by clarifying file extension requirements in API paths ([#242](https://github.com/adobe/da-admin/issues/242)) ([7164ffe](https://github.com/adobe/da-admin/commit/7164ffe7f4500c2090da5388f5bcbeb21d81a3a9)), closes [#129](https://github.com/adobe/da-admin/issues/129)
+
+## [1.1.3](https://github.com/adobe/da-admin/compare/v1.1.2...v1.1.3) (2026-01-28)
+
+
+### Bug Fixes
+
+* do not lose permissions if read and write on config ([#240](https://github.com/adobe/da-admin/issues/240)) ([ac0971e](https://github.com/adobe/da-admin/commit/ac0971e4aa8ba9d0bca221703394015dcddc2d62))
+
+## [1.1.2](https://github.com/adobe/da-admin/compare/v1.1.1...v1.1.2) (2026-01-15)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#218](https://github.com/adobe/da-admin/issues/218)) ([1bfca22](https://github.com/adobe/da-admin/commit/1bfca22987232fe6dc2247eeb9656a1e94c63ec8))
+
+## [1.1.1](https://github.com/adobe/da-admin/compare/v1.1.0...v1.1.1) (2026-01-15)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/helix-shared-process-queue to v3.1.5 ([#230](https://github.com/adobe/da-admin/issues/230)) ([f4b7861](https://github.com/adobe/da-admin/commit/f4b7861520aad0dab153381ee8ff4bca4c6930c5))
+
+# [1.1.0](https://github.com/adobe/da-admin/compare/v1.0.5...v1.1.0) (2026-01-13)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+* repair release ([#234](https://github.com/adobe/da-admin/issues/234)) ([104409e](https://github.com/adobe/da-admin/commit/104409ec43651cc2359929a683509f279248e6b6))
+
+
+### Features
+
+* add special IMS org with full access ([#233](https://github.com/adobe/da-admin/issues/233)) ([8e35211](https://github.com/adobe/da-admin/commit/8e35211c475e5ac9112ef9915166fe0b41a58ac8))
+
+# [1.1.0](https://github.com/adobe/da-admin/compare/v1.0.5...v1.1.0) (2026-01-13)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+
+
+### Features
+
+* add special IMS org with full access ([#233](https://github.com/adobe/da-admin/issues/233)) ([8e35211](https://github.com/adobe/da-admin/commit/8e35211c475e5ac9112ef9915166fe0b41a58ac8))
+
+## [1.0.6](https://github.com/adobe/da-admin/compare/v1.0.5...v1.0.6) (2026-01-07)
+
+
+### Bug Fixes
+
+* no exception if no destination provided ([#231](https://github.com/adobe/da-admin/issues/231)) ([df0939f](https://github.com/adobe/da-admin/commit/df0939fad9a969b904e2877c2e94855281f27719))
+
+## [1.0.5](https://github.com/adobe/da-admin/compare/v1.0.4...v1.0.5) (2025-12-18)
+
+
+### Bug Fixes
+
+* fix prod worker name ([#227](https://github.com/adobe/da-admin/issues/227)) ([73b05c7](https://github.com/adobe/da-admin/commit/73b05c72aace78c99b8a3f54ea517172fa3120f0))
+
+## [1.0.4](https://github.com/adobe/da-admin/compare/v1.0.3...v1.0.4) (2025-12-18)
+
+
+### Bug Fixes
+
+* GH-221 - Disable anonymous access ([#225](https://github.com/adobe/da-admin/issues/225)) ([df98f3e](https://github.com/adobe/da-admin/commit/df98f3eca7b51ae05db7106a01b7f77f25f3c6c8)), closes [#221](https://github.com/adobe/da-admin/issues/221) [#221](https://github.com/adobe/da-admin/issues/221) [#221](https://github.com/adobe/da-admin/issues/221)
+
+## [1.0.3](https://github.com/adobe/da-admin/compare/v1.0.2...v1.0.3) (2025-12-17)
+
+
+### Bug Fixes
+
+* stalled response ([#226](https://github.com/adobe/da-admin/issues/226)) ([d32fa3e](https://github.com/adobe/da-admin/commit/d32fa3eb470c8fbdbca61e9b9ba7961956ab9bbf))
+
+## [1.0.2](https://github.com/adobe/da-admin/compare/v1.0.1...v1.0.2) (2025-12-15)
+
+
+### Bug Fixes
+
+* exception when no path ([#223](https://github.com/adobe/da-admin/issues/223)) ([cb97c95](https://github.com/adobe/da-admin/commit/cb97c95c87ef019448b18c56b358aa27e0d31f73))
+
+## [1.0.1](https://github.com/adobe/da-admin/compare/v1.0.0...v1.0.1) (2025-12-10)
+
+
+### Bug Fixes
+
+* capture failing version requests ([#220](https://github.com/adobe/da-admin/issues/220)) ([729c8f5](https://github.com/adobe/da-admin/commit/729c8f5cc85573cd0dd2f761eb6ab8d471a820cb))
+
+# 1.0.0 (2025-12-04)
+
+
+### Bug Fixes
+
+* add IMS offline token validation ([#109](https://github.com/adobe/da-admin/issues/109)) ([ba7f961](https://github.com/adobe/da-admin/commit/ba7f961401013e92e41fd03381dff38655a65a7a))
+* add more tests for getObject ([#148](https://github.com/adobe/da-admin/issues/148)) ([7055d3c](https://github.com/adobe/da-admin/commit/7055d3cb678545a59ea4921da276741350410cc9))
+* add semantic release ([#213](https://github.com/adobe/da-admin/issues/213)) ([86b608d](https://github.com/adobe/da-admin/commit/86b608d5c057778c596b7668321d5161eb4d7ca3))
+* build ([51c6255](https://github.com/adobe/da-admin/commit/51c62552009429642df65aaa5588c2f27b5dbe61))
+* consistently use 'syncadmin' (no intercaps) ([#198](https://github.com/adobe/da-admin/issues/198)) ([3197624](https://github.com/adobe/da-admin/commit/3197624201ecad6fcc2cec25f6fd96b35c9cb614))
+* CopySource needs to be encoded ([#210](https://github.com/adobe/da-admin/issues/210)) ([1ab3fc8](https://github.com/adobe/da-admin/commit/1ab3fc8176c3f302057dbb33a5e95d4a08e92239))
+* do not respond a 404 on error ([#184](https://github.com/adobe/da-admin/issues/184)) ([b1d10c8](https://github.com/adobe/da-admin/commit/b1d10c8c59d606c534182cb9b494974c1364d5a7))
+* error when copying a file that exists ([#185](https://github.com/adobe/da-admin/issues/185)) ([7215387](https://github.com/adobe/da-admin/commit/7215387ca4093341bceeba27e506174a2346bbd2))
+* get handler returns undefined ([#168](https://github.com/adobe/da-admin/issues/168)) ([aa55ce5](https://github.com/adobe/da-admin/commit/aa55ce52f942aae3580302520522ca60acb91cac))
+* last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145)) ([edf1de1](https://github.com/adobe/da-admin/commit/edf1de1344ab61b052cf40c41254b20428394e94))
+* non-https links in docs ([#190](https://github.com/adobe/da-admin/issues/190)) ([661db82](https://github.com/adobe/da-admin/commit/661db821e9a2cf6fb332310b2e5e5467e2a3b80d))
+* only invalidate collab for html documents ([#167](https://github.com/adobe/da-admin/issues/167)) ([71e6a1c](https://github.com/adobe/da-admin/commit/71e6a1c983c24f24e51d5859757c5edf5f693903)), closes [#166](https://github.com/adobe/da-admin/issues/166)
+* persist creds ([d5dfed1](https://github.com/adobe/da-admin/commit/d5dfed17a54048c5190dc8ef43235d3878276391))
+* pin s3 client version due to problems with DOMParser ([#201](https://github.com/adobe/da-admin/issues/201)) ([1f93628](https://github.com/adobe/da-admin/commit/1f93628b022a1f360f985195039d48e27956bc7f))
+* preserve content type when copying ([#182](https://github.com/adobe/da-admin/issues/182)) ([4e83525](https://github.com/adobe/da-admin/commit/4e835252e8e7d05075145a4268eb7da426430f47))
+* put/post to source responds with hlx.page / hlx.live ([#209](https://github.com/adobe/da-admin/issues/209)) ([0415ef4](https://github.com/adobe/da-admin/commit/0415ef40a36ebde729185a4df5fbce0cebc9a5b1))
+* trigger release ([3c35bb4](https://github.com/adobe/da-admin/commit/3c35bb4a5803540ded0b6c5845d7711fcf3e9e5e))
+* versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144)) ([a384662](https://github.com/adobe/da-admin/commit/a384662b6ecd9af80b3ad9ead5fa9b6763ebfcc2))
+* **versionsource:** "delegate" permission check to api ([#179](https://github.com/adobe/da-admin/issues/179)) ([04b17f2](https://github.com/adobe/da-admin/commit/04b17f2ccce381d62dbde1f88102efb415d343b2))
+* when catching exceptions don't rely on $metadata being set ([#170](https://github.com/adobe/da-admin/issues/170)) ([5e121f0](https://github.com/adobe/da-admin/commit/5e121f0a3a918aa74f41fae67785c41c5ebc474d)), closes [#169](https://github.com/adobe/da-admin/issues/169)
+
+
+### Features
+
+* add a restore point if body is empty ([#173](https://github.com/adobe/da-admin/issues/173)) ([65cbf32](https://github.com/adobe/da-admin/commit/65cbf321eb45f53cec1b3f604c179659526ed5f3))
+* add HTTP conditional request support (If-Match, If-None-Match) ([#187](https://github.com/adobe/da-admin/issues/187)) ([190afd8](https://github.com/adobe/da-admin/commit/190afd8a443ba05a5a12d2a600d5d36cad9a7671))
+* do not create a version for binaries ([#211](https://github.com/adobe/da-admin/issues/211)) ([92ea28a](https://github.com/adobe/da-admin/commit/92ea28aba8889be7be013196fcbf405c2fb37a91))
+* handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204)) ([5ae63c5](https://github.com/adobe/da-admin/commit/5ae63c52a3571a5a426c3bbee429ade62d4da799))
+* handle bad requests ([#214](https://github.com/adobe/da-admin/issues/214)) ([be0dc49](https://github.com/adobe/da-admin/commit/be0dc49e99bf2feabb1db60da838fde7ec6a9a32)), closes [#204](https://github.com/adobe/da-admin/issues/204) [#212](https://github.com/adobe/da-admin/issues/212)
+* no version for binaries ([dd98406](https://github.com/adobe/da-admin/commit/dd98406b1b8d272d137c91494cfa1bb610592068))
+* preserve content type in versions ([#177](https://github.com/adobe/da-admin/issues/177)) ([5182cd5](https://github.com/adobe/da-admin/commit/5182cd5f06af96795554b29d25fff8dfccf50dd0))
+* return last modified for source based on timestamp ([#142](https://github.com/adobe/da-admin/issues/142)) ([2b3454b](https://github.com/adobe/da-admin/commit/2b3454bc76421c1414a7d607edd37a6300e28ce0))
+* send shared secret to collab ([#202](https://github.com/adobe/da-admin/issues/202)) ([6636423](https://github.com/adobe/da-admin/commit/66364239c84a6a843097fb1fc640063d6d84a3b1))
+
+
+### Reverts
+
+* Revert "feat: handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204))" ([#212](https://github.com/adobe/da-admin/issues/212)) ([306fcb5](https://github.com/adobe/da-admin/commit/306fcb5177e881fbe3f72ff4ffecb05065f11e59))
+* Revert "Fine grained access control ([#108](https://github.com/adobe/da-admin/issues/108))" ([#118](https://github.com/adobe/da-admin/issues/118)) ([68918ca](https://github.com/adobe/da-admin/commit/68918ca5327499e1910f4cd26effd0e5636334f0))
+* Revert "fix: last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145))" ([#147](https://github.com/adobe/da-admin/issues/147)) ([20b1a61](https://github.com/adobe/da-admin/commit/20b1a6180e4fcc7f5142e9b6b27ae272e9502b43))
+* Revert "fix: versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144))" ([#146](https://github.com/adobe/da-admin/issues/146)) ([f626da7](https://github.com/adobe/da-admin/commit/f626da7ec16dea5f52434350fb3b387e93a30b43))
+* Revert "Revert "fix: last modified header for source"" ([#149](https://github.com/adobe/da-admin/issues/149)) ([767629c](https://github.com/adobe/da-admin/commit/767629c3dc525bca80829906d6b6db4007c372f2)), closes [#145](https://github.com/adobe/da-admin/issues/145) [#147](https://github.com/adobe/da-admin/issues/147)
+
+# 1.0.0 (2025-12-04)
+
+
+### Bug Fixes
+
+* add IMS offline token validation ([#109](https://github.com/adobe/da-admin/issues/109)) ([ba7f961](https://github.com/adobe/da-admin/commit/ba7f961401013e92e41fd03381dff38655a65a7a))
+* add more tests for getObject ([#148](https://github.com/adobe/da-admin/issues/148)) ([7055d3c](https://github.com/adobe/da-admin/commit/7055d3cb678545a59ea4921da276741350410cc9))
+* add semantic release ([#213](https://github.com/adobe/da-admin/issues/213)) ([86b608d](https://github.com/adobe/da-admin/commit/86b608d5c057778c596b7668321d5161eb4d7ca3))
+* build ([51c6255](https://github.com/adobe/da-admin/commit/51c62552009429642df65aaa5588c2f27b5dbe61))
+* consistently use 'syncadmin' (no intercaps) ([#198](https://github.com/adobe/da-admin/issues/198)) ([3197624](https://github.com/adobe/da-admin/commit/3197624201ecad6fcc2cec25f6fd96b35c9cb614))
+* CopySource needs to be encoded ([#210](https://github.com/adobe/da-admin/issues/210)) ([1ab3fc8](https://github.com/adobe/da-admin/commit/1ab3fc8176c3f302057dbb33a5e95d4a08e92239))
+* do not respond a 404 on error ([#184](https://github.com/adobe/da-admin/issues/184)) ([b1d10c8](https://github.com/adobe/da-admin/commit/b1d10c8c59d606c534182cb9b494974c1364d5a7))
+* error when copying a file that exists ([#185](https://github.com/adobe/da-admin/issues/185)) ([7215387](https://github.com/adobe/da-admin/commit/7215387ca4093341bceeba27e506174a2346bbd2))
+* get handler returns undefined ([#168](https://github.com/adobe/da-admin/issues/168)) ([aa55ce5](https://github.com/adobe/da-admin/commit/aa55ce52f942aae3580302520522ca60acb91cac))
+* last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145)) ([edf1de1](https://github.com/adobe/da-admin/commit/edf1de1344ab61b052cf40c41254b20428394e94))
+* non-https links in docs ([#190](https://github.com/adobe/da-admin/issues/190)) ([661db82](https://github.com/adobe/da-admin/commit/661db821e9a2cf6fb332310b2e5e5467e2a3b80d))
+* only invalidate collab for html documents ([#167](https://github.com/adobe/da-admin/issues/167)) ([71e6a1c](https://github.com/adobe/da-admin/commit/71e6a1c983c24f24e51d5859757c5edf5f693903)), closes [#166](https://github.com/adobe/da-admin/issues/166)
+* persist creds ([d5dfed1](https://github.com/adobe/da-admin/commit/d5dfed17a54048c5190dc8ef43235d3878276391))
+* pin s3 client version due to problems with DOMParser ([#201](https://github.com/adobe/da-admin/issues/201)) ([1f93628](https://github.com/adobe/da-admin/commit/1f93628b022a1f360f985195039d48e27956bc7f))
+* preserve content type when copying ([#182](https://github.com/adobe/da-admin/issues/182)) ([4e83525](https://github.com/adobe/da-admin/commit/4e835252e8e7d05075145a4268eb7da426430f47))
+* put/post to source responds with hlx.page / hlx.live ([#209](https://github.com/adobe/da-admin/issues/209)) ([0415ef4](https://github.com/adobe/da-admin/commit/0415ef40a36ebde729185a4df5fbce0cebc9a5b1))
+* versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144)) ([a384662](https://github.com/adobe/da-admin/commit/a384662b6ecd9af80b3ad9ead5fa9b6763ebfcc2))
+* **versionsource:** "delegate" permission check to api ([#179](https://github.com/adobe/da-admin/issues/179)) ([04b17f2](https://github.com/adobe/da-admin/commit/04b17f2ccce381d62dbde1f88102efb415d343b2))
+* when catching exceptions don't rely on $metadata being set ([#170](https://github.com/adobe/da-admin/issues/170)) ([5e121f0](https://github.com/adobe/da-admin/commit/5e121f0a3a918aa74f41fae67785c41c5ebc474d)), closes [#169](https://github.com/adobe/da-admin/issues/169)
+
+
+### Features
+
+* add a restore point if body is empty ([#173](https://github.com/adobe/da-admin/issues/173)) ([65cbf32](https://github.com/adobe/da-admin/commit/65cbf321eb45f53cec1b3f604c179659526ed5f3))
+* add HTTP conditional request support (If-Match, If-None-Match) ([#187](https://github.com/adobe/da-admin/issues/187)) ([190afd8](https://github.com/adobe/da-admin/commit/190afd8a443ba05a5a12d2a600d5d36cad9a7671))
+* do not create a version for binaries ([#211](https://github.com/adobe/da-admin/issues/211)) ([92ea28a](https://github.com/adobe/da-admin/commit/92ea28aba8889be7be013196fcbf405c2fb37a91))
+* handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204)) ([5ae63c5](https://github.com/adobe/da-admin/commit/5ae63c52a3571a5a426c3bbee429ade62d4da799))
+* handle bad requests ([#214](https://github.com/adobe/da-admin/issues/214)) ([be0dc49](https://github.com/adobe/da-admin/commit/be0dc49e99bf2feabb1db60da838fde7ec6a9a32)), closes [#204](https://github.com/adobe/da-admin/issues/204) [#212](https://github.com/adobe/da-admin/issues/212)
+* no version for binaries ([dd98406](https://github.com/adobe/da-admin/commit/dd98406b1b8d272d137c91494cfa1bb610592068))
+* preserve content type in versions ([#177](https://github.com/adobe/da-admin/issues/177)) ([5182cd5](https://github.com/adobe/da-admin/commit/5182cd5f06af96795554b29d25fff8dfccf50dd0))
+* return last modified for source based on timestamp ([#142](https://github.com/adobe/da-admin/issues/142)) ([2b3454b](https://github.com/adobe/da-admin/commit/2b3454bc76421c1414a7d607edd37a6300e28ce0))
+* send shared secret to collab ([#202](https://github.com/adobe/da-admin/issues/202)) ([6636423](https://github.com/adobe/da-admin/commit/66364239c84a6a843097fb1fc640063d6d84a3b1))
+
+
+### Reverts
+
+* Revert "feat: handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204))" ([#212](https://github.com/adobe/da-admin/issues/212)) ([306fcb5](https://github.com/adobe/da-admin/commit/306fcb5177e881fbe3f72ff4ffecb05065f11e59))
+* Revert "Fine grained access control ([#108](https://github.com/adobe/da-admin/issues/108))" ([#118](https://github.com/adobe/da-admin/issues/118)) ([68918ca](https://github.com/adobe/da-admin/commit/68918ca5327499e1910f4cd26effd0e5636334f0))
+* Revert "fix: last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145))" ([#147](https://github.com/adobe/da-admin/issues/147)) ([20b1a61](https://github.com/adobe/da-admin/commit/20b1a6180e4fcc7f5142e9b6b27ae272e9502b43))
+* Revert "fix: versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144))" ([#146](https://github.com/adobe/da-admin/issues/146)) ([f626da7](https://github.com/adobe/da-admin/commit/f626da7ec16dea5f52434350fb3b387e93a30b43))
+* Revert "Revert "fix: last modified header for source"" ([#149](https://github.com/adobe/da-admin/issues/149)) ([767629c](https://github.com/adobe/da-admin/commit/767629c3dc525bca80829906d6b6db4007c372f2)), closes [#145](https://github.com/adobe/da-admin/issues/145) [#147](https://github.com/adobe/da-admin/issues/147)
+
+# 1.0.0 (2025-12-04)
+
+
+### Bug Fixes
+
+* add IMS offline token validation ([#109](https://github.com/adobe/da-admin/issues/109)) ([ba7f961](https://github.com/adobe/da-admin/commit/ba7f961401013e92e41fd03381dff38655a65a7a))
+* add more tests for getObject ([#148](https://github.com/adobe/da-admin/issues/148)) ([7055d3c](https://github.com/adobe/da-admin/commit/7055d3cb678545a59ea4921da276741350410cc9))
+* add semantic release ([#213](https://github.com/adobe/da-admin/issues/213)) ([86b608d](https://github.com/adobe/da-admin/commit/86b608d5c057778c596b7668321d5161eb4d7ca3))
+* build ([51c6255](https://github.com/adobe/da-admin/commit/51c62552009429642df65aaa5588c2f27b5dbe61))
+* consistently use 'syncadmin' (no intercaps) ([#198](https://github.com/adobe/da-admin/issues/198)) ([3197624](https://github.com/adobe/da-admin/commit/3197624201ecad6fcc2cec25f6fd96b35c9cb614))
+* CopySource needs to be encoded ([#210](https://github.com/adobe/da-admin/issues/210)) ([1ab3fc8](https://github.com/adobe/da-admin/commit/1ab3fc8176c3f302057dbb33a5e95d4a08e92239))
+* do not respond a 404 on error ([#184](https://github.com/adobe/da-admin/issues/184)) ([b1d10c8](https://github.com/adobe/da-admin/commit/b1d10c8c59d606c534182cb9b494974c1364d5a7))
+* error when copying a file that exists ([#185](https://github.com/adobe/da-admin/issues/185)) ([7215387](https://github.com/adobe/da-admin/commit/7215387ca4093341bceeba27e506174a2346bbd2))
+* get handler returns undefined ([#168](https://github.com/adobe/da-admin/issues/168)) ([aa55ce5](https://github.com/adobe/da-admin/commit/aa55ce52f942aae3580302520522ca60acb91cac))
+* last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145)) ([edf1de1](https://github.com/adobe/da-admin/commit/edf1de1344ab61b052cf40c41254b20428394e94))
+* non-https links in docs ([#190](https://github.com/adobe/da-admin/issues/190)) ([661db82](https://github.com/adobe/da-admin/commit/661db821e9a2cf6fb332310b2e5e5467e2a3b80d))
+* only invalidate collab for html documents ([#167](https://github.com/adobe/da-admin/issues/167)) ([71e6a1c](https://github.com/adobe/da-admin/commit/71e6a1c983c24f24e51d5859757c5edf5f693903)), closes [#166](https://github.com/adobe/da-admin/issues/166)
+* persist creds ([d5dfed1](https://github.com/adobe/da-admin/commit/d5dfed17a54048c5190dc8ef43235d3878276391))
+* pin s3 client version due to problems with DOMParser ([#201](https://github.com/adobe/da-admin/issues/201)) ([1f93628](https://github.com/adobe/da-admin/commit/1f93628b022a1f360f985195039d48e27956bc7f))
+* preserve content type when copying ([#182](https://github.com/adobe/da-admin/issues/182)) ([4e83525](https://github.com/adobe/da-admin/commit/4e835252e8e7d05075145a4268eb7da426430f47))
+* put/post to source responds with hlx.page / hlx.live ([#209](https://github.com/adobe/da-admin/issues/209)) ([0415ef4](https://github.com/adobe/da-admin/commit/0415ef40a36ebde729185a4df5fbce0cebc9a5b1))
+* versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144)) ([a384662](https://github.com/adobe/da-admin/commit/a384662b6ecd9af80b3ad9ead5fa9b6763ebfcc2))
+* **versionsource:** "delegate" permission check to api ([#179](https://github.com/adobe/da-admin/issues/179)) ([04b17f2](https://github.com/adobe/da-admin/commit/04b17f2ccce381d62dbde1f88102efb415d343b2))
+* when catching exceptions don't rely on $metadata being set ([#170](https://github.com/adobe/da-admin/issues/170)) ([5e121f0](https://github.com/adobe/da-admin/commit/5e121f0a3a918aa74f41fae67785c41c5ebc474d)), closes [#169](https://github.com/adobe/da-admin/issues/169)
+
+
+### Features
+
+* add a restore point if body is empty ([#173](https://github.com/adobe/da-admin/issues/173)) ([65cbf32](https://github.com/adobe/da-admin/commit/65cbf321eb45f53cec1b3f604c179659526ed5f3))
+* add HTTP conditional request support (If-Match, If-None-Match) ([#187](https://github.com/adobe/da-admin/issues/187)) ([190afd8](https://github.com/adobe/da-admin/commit/190afd8a443ba05a5a12d2a600d5d36cad9a7671))
+* do not create a version for binaries ([#211](https://github.com/adobe/da-admin/issues/211)) ([92ea28a](https://github.com/adobe/da-admin/commit/92ea28aba8889be7be013196fcbf405c2fb37a91))
+* handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204)) ([5ae63c5](https://github.com/adobe/da-admin/commit/5ae63c52a3571a5a426c3bbee429ade62d4da799))
+* handle bad requests ([#214](https://github.com/adobe/da-admin/issues/214)) ([be0dc49](https://github.com/adobe/da-admin/commit/be0dc49e99bf2feabb1db60da838fde7ec6a9a32)), closes [#204](https://github.com/adobe/da-admin/issues/204) [#212](https://github.com/adobe/da-admin/issues/212)
+* no version for binaries ([dd98406](https://github.com/adobe/da-admin/commit/dd98406b1b8d272d137c91494cfa1bb610592068))
+* preserve content type in versions ([#177](https://github.com/adobe/da-admin/issues/177)) ([5182cd5](https://github.com/adobe/da-admin/commit/5182cd5f06af96795554b29d25fff8dfccf50dd0))
+* return last modified for source based on timestamp ([#142](https://github.com/adobe/da-admin/issues/142)) ([2b3454b](https://github.com/adobe/da-admin/commit/2b3454bc76421c1414a7d607edd37a6300e28ce0))
+* send shared secret to collab ([#202](https://github.com/adobe/da-admin/issues/202)) ([6636423](https://github.com/adobe/da-admin/commit/66364239c84a6a843097fb1fc640063d6d84a3b1))
+
+
+### Reverts
+
+* Revert "feat: handle bad requests ([#204](https://github.com/adobe/da-admin/issues/204))" ([#212](https://github.com/adobe/da-admin/issues/212)) ([306fcb5](https://github.com/adobe/da-admin/commit/306fcb5177e881fbe3f72ff4ffecb05065f11e59))
+* Revert "Fine grained access control ([#108](https://github.com/adobe/da-admin/issues/108))" ([#118](https://github.com/adobe/da-admin/issues/118)) ([68918ca](https://github.com/adobe/da-admin/commit/68918ca5327499e1910f4cd26effd0e5636334f0))
+* Revert "fix: last modified header for source ([#145](https://github.com/adobe/da-admin/issues/145))" ([#147](https://github.com/adobe/da-admin/issues/147)) ([20b1a61](https://github.com/adobe/da-admin/commit/20b1a6180e4fcc7f5142e9b6b27ae272e9502b43))
+* Revert "fix: versioning timestamp for version and document itself ([#144](https://github.com/adobe/da-admin/issues/144))" ([#146](https://github.com/adobe/da-admin/issues/146)) ([f626da7](https://github.com/adobe/da-admin/commit/f626da7ec16dea5f52434350fb3b387e93a30b43))
+* Revert "Revert "fix: last modified header for source"" ([#149](https://github.com/adobe/da-admin/issues/149)) ([767629c](https://github.com/adobe/da-admin/commit/767629c3dc525bca80829906d6b6db4007c372f2)), closes [#145](https://github.com/adobe/da-admin/issues/145) [#147](https://github.com/adobe/da-admin/issues/147)

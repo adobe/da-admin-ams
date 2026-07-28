@@ -4,7 +4,18 @@ source:
   properties:
     data:
       description: The content to store at the specified location.
-      type: blob
+      type: string
+      format: binary
+    guid:
+      description: |
+        Optional client-supplied identifier for the document. When the target
+        location does not already have a stored identifier, this value becomes
+        the document identifier. It must be a UUID. A value that is not a UUID
+        is rejected with a 400 response. When the target already has a stored
+        identifier that differs from this value, the request is rejected with a
+        409 response. When omitted, the service generates a UUID.
+      type: string
+      format: uuid
 
 copy:
   source:
@@ -64,15 +75,14 @@ sourceInfo:
       allOf:
         - required:
             - editUrl
-            - viewUrl
-            - status
+            - contentUrl
         - properties:
             editUrl:
               description: The edit URL of the resource.
               type: string
               format: url
-            viewUrl:
-              description: The view URL of the resource. For a site, used in AEM fstab.yaml.
+            contentUrl:
+              description: The content URL of the resource.
               type: string
               format: url
             status:
@@ -110,8 +120,6 @@ sourceList:
             type: object
 
 version-list:
-  required:
-    - versions
   description: List of audits and sources.
   type: array
   items:
