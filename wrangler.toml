@@ -83,6 +83,43 @@ CF_ACCOUNT_ID = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
 # S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
 # IMS_ORIGIN = "set via wrangler secret put"
 
+# === ENT-AEM ENVIRONMENT ===
+########################################################
+[env.ent-aem]
+account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+keep_vars = true
+
+routes = [
+  { pattern = "admin.ent-da.live/*", zone_name = "ent-da.live" }
+]
+
+# Service bindings (commented out until da-collab is deployed)
+services = [
+  { binding = "dacollab", service = "da-collab-ams-ent-aem" }
+]
+
+kv_namespaces = [
+  { binding = "DA_AUTH", id = "27fed51948d442e4b35ee5b434848f4d" },
+  { binding = "DA_CONFIG", id = "d1ca64ab2d3d489d8327e14ec51a5f90" },
+  { binding = "DA_JOBS", id = "9ea0a45def1d4421932aa658260679ee" }
+]
+
+r2_buckets = [
+  { binding = "AEM_CONTENT", bucket_name = "aem-content-ent" }
+]
+
+[env.ent-aem.vars]
+ENVIRONMENT = "ent-aem"
+DA_DOMAIN = "ent-da.live"
+DA_COLLAB = "https://collab.ent-da.live"
+AEM_BUCKET_NAME = "aem-content-ent"
+HLX_PROD_SERVER_HOST_PAGE = "ent-aem.page"
+HLX_PROD_SERVER_HOST_LIVE = "ent-aem.live"
+CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+# S3_ACCESS_KEY_ID = "set via wrangler secret put"
+# S3_SECRET_ACCESS_KEY = "set via wrangler secret put"
+# IMS_ORIGIN = "set via wrangler secret put"
+
 # === EDS EU ENVIRONMENT ===
 ########################################################
 [env.eds-eu]
