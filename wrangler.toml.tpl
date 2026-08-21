@@ -21,30 +21,30 @@
 # Secrets (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, IMS_ORIGIN) are NOT templated —
 # they're pushed via `wrangler secret put` by ams-eds-terraform's populate-secrets.sh.
 
-name = "da-admin-ams-tf-poc"
+name = "da-admin-ams-${NODE_ENV}"
 main = "src/index.js"
 compatibility_date = "2024-11-11"
-account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+account_id = "${CLOUDFLARE_ACCOUNT_ID}"
 keep_vars = true
 
 routes = [
-  { pattern = "admin.adobems-da.live/*", zone_name = "adobems-da.live" }
+  { pattern = "admin.${DA_DOMAIN}/*", zone_name = "${DA_DOMAIN}" }
 ]
 
 # Service binding to da-collab, rendered from DA_ADMIN_SERVICES (env-driven) so the
 # deploy orchestrator can omit it on da-admin's FIRST pass (before da-collab exists)
 # and restore it on the second pass. See scripts/deploy-da-workers.sh. Steady-state
 # value (set by generate-env-file.sh): [{ binding = "dacollab", service = "da-collab-ams-<env>" }].
-services = []
+services = ${DA_ADMIN_SERVICES}
 
 kv_namespaces = [
-  { binding = "DA_AUTH", id = "2d2bce07ab384824907bd99a1611a376" },
-  { binding = "DA_CONFIG", id = "d78dbabbae5c4fd1a007e3ef33e5e23c" },
-  { binding = "DA_JOBS", id = "c3d5da7b9e8e4e129e5e6afc962c35e4" }
+  { binding = "DA_AUTH", id = "${DA_AUTH_KV_ID}" },
+  { binding = "DA_CONFIG", id = "${DA_CONFIG_KV_ID}" },
+  { binding = "DA_JOBS", id = "${DA_JOBS_KV_ID}" }
 ]
 
 r2_buckets = [
-  { binding = "AEM_CONTENT", bucket_name = "aem-content-tf-poc" }
+  { binding = "AEM_CONTENT", bucket_name = "${AEM_BUCKET_NAME}" }
 ]
 
 [dev]
@@ -52,10 +52,10 @@ port = 8787
 
 [vars]
 VERSION = "@@VERSION@@"
-ENVIRONMENT = "tf-poc"
-DA_DOMAIN = "adobems-da.live"
-DA_COLLAB = "collab.adobems-da.live"
-AEM_BUCKET_NAME = "aem-content-tf-poc"
-HLX_PROD_SERVER_HOST_PAGE = "adobems-aem.page"
-HLX_PROD_SERVER_HOST_LIVE = "adobems-aem.live"
-CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+ENVIRONMENT = "${NODE_ENV}"
+DA_DOMAIN = "${DA_DOMAIN}"
+DA_COLLAB = "collab.${DA_DOMAIN}"
+AEM_BUCKET_NAME = "${AEM_BUCKET_NAME}"
+HLX_PROD_SERVER_HOST_PAGE = "${HLX_PROD_SERVER_HOST_PAGE}"
+HLX_PROD_SERVER_HOST_LIVE = "${HLX_PROD_SERVER_HOST_LIVE}"
+CF_ACCOUNT_ID = "${CLOUDFLARE_ACCOUNT_ID}"

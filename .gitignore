@@ -144,3 +144,4 @@ dist
 test/it/bucket/
 
 .claude
+wrangler.toml
