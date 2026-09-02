@@ -18,8 +18,11 @@
 #   DA_AUTH_KV_ID / DA_CONFIG_KV_ID / DA_JOBS_KV_ID   KV namespace IDs (cloudflare/00-foundation)
 #   HLX_PROD_SERVER_HOST_PAGE / HLX_PROD_SERVER_HOST_LIVE
 #
-# Secrets (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, IMS_ORIGIN) are NOT templated —
-# they're pushed via `wrangler secret put` by ams-eds-terraform's populate-secrets.sh.
+# Secrets (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, IMS_ORIGIN, DA_OPS_IMS_ORG) are NOT
+# templated — they're pushed via `wrangler secret put` by ams-eds-terraform's
+# populate-secrets.sh. DA_OPS_IMS_ORG (IMS org granted ops rights, read by
+# src/utils/auth.js) is sourced from the operator-entered da_ops_ims_org tfvar; when
+# unset the worker's `if (env.DA_OPS_IMS_ORG)` guard simply no-ops.
 
 name = "da-admin-ams-${NODE_ENV}"
 main = "src/index.js"
