@@ -108,12 +108,76 @@ async function storeJWSInCache(env, keysUrl, keysCache) {
   }
 }
 
+const TST_PREFIX = 'hlxtst_';
+
+// Mirrors da-admin's own org/site extraction (utils/daCtx.js) so the transient site token's
+// `aud` claim (`{site}--{org}.{domain}`, minted by helix-admin) can be checked against the
+// site actually being requested — duplicated rather than threaded through as a parameter,
+// since daCtx.js computes org/site only after calling getUsers().
+function orgSiteFromUrl(url) {
+  let { pathname } = new URL(url);
+  if (pathname.startsWith('/api')) pathname = pathname.replace('/api', '');
+  const lower = pathname.slice(1).toLowerCase();
+  const sanitized = lower.endsWith('/') ? lower.slice(0, -1) : lower;
+  const [, org, site] = sanitized.split('/');
+  return { org, site };
+}
+
+// Verifies a transient site token (hlxtst_...) minted by helix-admin for exactly this
+// "trust another service's identity/access check" purpose (see helix-admin's
+// getTransientSiteTokenInfo). Unlike an IMS access_token, it carries no org/group
+// membership — it identifies the user, but grants nothing beyond what a site's ACLs already
+// allow with no group match, until a direct Okta group lookup (a separate change) attaches
+// real group data for Okta-authenticated users.
+async function parseTransientSiteToken(rawToken, req, env) {
+  const token = rawToken.slice(TST_PREFIX.length);
+  const { org, site } = orgSiteFromUrl(req.url);
+  if (!org || !site) return { email: 'anonymous' };
+
+  const keysURL = `https://admin.${env.HLX_PROD_SERVER_HOST_PAGE}/auth/discovery/keys`;
+  try {
+    const keysCache = await getPreviouslyCachedJWKS(env, keysURL);
+    const { uat } = keysCache;
+
+    const jwks = createRemoteJWKSet(
+      new URL(keysURL),
+      {
+        [jwksCache]: keysCache,
+        cooldownDuration: 30000,
+        cacheMaxAge: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
+      },
+    );
+
+    const { payload } = await jwtVerify(token, jwks, {
+      audience: [
+        `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
+        `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
+      ],
+    });
+
+    if (uat !== keysCache.uat) {
+      await storeJWSInCache(env, keysURL, keysCache);
+    }
+
+    if (!payload.sub) return { email: 'anonymous' };
+    return { email: payload.sub, ident: payload.sub, orgs: [] };
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.log('transient site token verification failed', e);
+    return { email: 'anonymous' };
+  }
+}
+
 export async function getUsers(req, env) {
   const authHeader = req.headers?.get('authorization');
   if (!authHeader) return [{ email: 'anonymous' }];
 
   async function parseUser(token) {
     if (!token || token.trim().length === 0) return { email: 'anonymous' };
+
+    if (token.startsWith(TST_PREFIX)) {
+      return parseTransientSiteToken(token, req, env);
+    }
 
     let payload;
     try {
