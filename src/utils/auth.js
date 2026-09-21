@@ -205,6 +205,13 @@ async function parseTransientSiteToken(rawToken, req, env) {
   const token = rawToken.slice(TST_PREFIX.length);
   const { org, site } = orgSiteFromUrl(req.url);
   if (!org || !site) return { email: 'anonymous' };
+  // The audience check below joins org/site with '--', which isn't collision-free if either
+  // legally contained '--' itself (site="a--b", org="c" and site="a", org="b--c" both produce
+  // the same joined string) — a token validly signed for one org/site could then pass the
+  // audience check for a different one. '--' is already EDS's own reserved separator
+  // elsewhere (e.g. main--site--org hostnames), so this shouldn't occur in practice, but
+  // reject rather than rely on that upstream constraint holding here as well.
+  if (org.includes('--') || site.includes('--')) return { email: 'anonymous' };
 
   const keysURL = `https://admin.${env.HLX_PROD_SERVER_HOST_PAGE}/auth/discovery/keys`;
   let payload;

@@ -159,6 +159,17 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
     assert.strictEqual(users[0].email, 'anonymous');
   });
 
+  it('rejects a request whose org/site would produce a colliding audience string', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    // A token genuinely minted for org="b--c", site="a" carries aud "a--b--c.page". Without
+    // the '--' guard, a request parsed as org="c", site="a--b" would construct the identical
+    // joined audience string and this token would incorrectly verify for it too.
+    const token = await signSiteToken(privateKey, { org: 'b--c', site: 'a' });
+
+    const users = await getUsers(req('/source/c/a--b/', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
   it('falls back to anonymous when the requested path has no org/site', async () => {
     const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
     const users = await getUsers(req('/list', token), ENV);
