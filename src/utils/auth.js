@@ -11,8 +11,21 @@
  */
 import { createRemoteJWKSet, jwtVerify, jwksCache } from 'jose';
 
+const TST_PREFIX = 'hlxtst_';
+// Namespaces the KV cache key so a site-token identity (keyed on email) can never collide
+// with an IMS session cached under the same DA_AUTH store (keyed on IMS's own user_id).
+const TST_CACHE_PREFIX = 'hlxtst:';
+
 export async function logout({ daCtx, env }) {
-  await Promise.all(daCtx.users.map((u) => env.DA_AUTH.delete(u.ident)));
+  // The IMS path caches under the bare ident; the Okta-derived path (see setOktaGroupUser
+  // below) caches under a TST_CACHE_PREFIX-prefixed key instead, so a signed-out user's
+  // cached group membership needs its own delete — otherwise it just sits there, readable
+  // until its own (capped) TTL lapses. A KV delete on a key that was never set is a harmless
+  // no-op, so it's safe to always issue both.
+  await Promise.all(daCtx.users.flatMap((u) => [
+    env.DA_AUTH.delete(u.ident),
+    env.DA_AUTH.delete(`${TST_CACHE_PREFIX}${u.ident}`),
+  ]));
   return { status: 200 };
 }
 
@@ -108,10 +121,6 @@ async function storeJWSInCache(env, keysUrl, keysCache) {
   }
 }
 
-const TST_PREFIX = 'hlxtst_';
-// Namespaces the KV cache key so a site-token identity (keyed on email) can never collide
-// with an IMS session cached under the same DA_AUTH store (keyed on IMS's own user_id).
-const TST_CACHE_PREFIX = 'hlxtst:';
 // Group membership should read as reasonably fresh — cap how long a resolved identity is
 // trusted even when the token itself is longer-lived, mirroring Flow Manager's own 30-minute
 // choice for the same trade-off (userSyncService.ts: "removing user from groups immediately

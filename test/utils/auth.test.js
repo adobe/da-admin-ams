@@ -1137,7 +1137,13 @@ describe('DA auth', () => {
     const daCtx = { users: [{ ident: '1234@a' }, { ident: '5678@b' }] };
 
     const resp = await logout({ env, daCtx });
-    assert.deepStrictEqual(new Set(['1234@a', '5678@b']), new Set(deleteCalled));
+    // Also deletes each user's hlxtst:-prefixed key (where a transient-site-token identity's
+    // Okta group membership is cached) — a signed-out user shouldn't keep reading their
+    // cached groups until that cache's own TTL happens to lapse.
+    assert.deepStrictEqual(
+      new Set(['1234@a', '5678@b', 'hlxtst:1234@a', 'hlxtst:5678@b']),
+      new Set(deleteCalled),
+    );
     assert.strictEqual(200, resp.status);
   });
 

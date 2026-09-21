@@ -75,9 +75,14 @@ function stubDiscoveryAndOkta({
 
 function memoryKvStore() {
   const store = new Map();
+  const puts = [];
   return {
     get: async (key) => store.get(key),
-    put: async (key, value) => { store.set(key, value); },
+    put: async (key, value, options) => {
+      store.set(key, value);
+      puts.push({ key, value, options });
+    },
+    puts,
     _store: store,
   };
 }
@@ -259,6 +264,58 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
       const users = await getUsers(req('/source/owner/repo/', token), env);
       assert.strictEqual(users[0].email, 'author@example.com');
       assert.deepStrictEqual(users[0].orgs, []);
+    });
+
+    it('treats a non-ACTIVE Okta user as no groups, not an error', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'SUSPENDED' } },
+        // Real groups are available at this id — proves a suspended user is denied them
+        // specifically because of the status check, not because Okta has nothing to return.
+        oktaGroupsById: { 'okta-user-1': [{ profile: { name: 'ssa-editors' } }] },
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      const users = await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(users[0].email, 'author@example.com');
+      assert.deepStrictEqual(users[0].orgs, [], 'a suspended Okta user must not inherit group-based access');
+    });
+
+    it('caps the cached identity at a 30-minute TTL even when the token lives much longer', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'ACTIVE' } },
+        oktaGroupsById: { 'okta-user-1': [{ profile: { name: 'ssa-editors' } }] },
+      });
+      const kv = memoryKvStore();
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: kv,
+      };
+      // A 24-hour-lived token — if the cache TTL weren't capped, it'd be cached that long too.
+      const token = await signSiteToken(privateKey, {
+        org: 'owner', site: 'repo', expSecondsFromNow: 24 * 60 * 60,
+      });
+
+      const before = Math.floor(Date.now() / 1000);
+      await getUsers(req('/source/owner/repo/', token), env);
+      const after = Math.floor(Date.now() / 1000);
+
+      // auth.js's own TST_CACHE_PREFIX, mirrored here rather than imported (not exported).
+      const put = kv.puts.find((p) => p.key.startsWith('hlxtst:'));
+      assert.ok(put, 'expected a hlxtst:-prefixed cache write');
+      assert.ok(
+        put.options.expiration <= after + 30 * 60,
+        `expiration ${put.options.expiration} not capped at ~30 minutes from now (${after})`,
+      );
+      assert.ok(
+        put.options.expiration >= before + 29 * 60,
+        `expiration ${put.options.expiration} capped far more aggressively than 30 minutes`,
+      );
     });
 
     it('treats an Okta API error as no groups, not an error', async () => {

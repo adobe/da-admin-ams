@@ -28,9 +28,13 @@ describe('Post Route', () => {
 
     const resp = await postHandler({ env, daCtx });
     assert.strictEqual(resp.status, 200);
-    assert.strictEqual(deleteCalled.length, 2);
+    // 2 users x 2 keys each: the bare ident (IMS path) plus its hlxtst:-prefixed counterpart
+    // (where a transient-site-token identity's Okta group membership is cached).
+    assert.strictEqual(deleteCalled.length, 4);
     assert(deleteCalled.includes('foo@bar.org'));
     assert(deleteCalled.includes('blah@blah.org'));
+    assert(deleteCalled.includes('hlxtst:foo@bar.org'));
+    assert(deleteCalled.includes('hlxtst:blah@blah.org'));
   });
 
   it('Test media route', async () => {
