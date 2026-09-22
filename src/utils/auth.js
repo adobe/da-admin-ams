@@ -11,8 +11,21 @@
  */
 import { createRemoteJWKSet, jwtVerify, jwksCache } from 'jose';
 
+const TST_PREFIX = 'hlxtst_';
+// Namespaces the KV cache key so a site-token identity (keyed on email) can never collide
+// with an IMS session cached under the same DA_AUTH store (keyed on IMS's own user_id).
+const TST_CACHE_PREFIX = 'hlxtst:';
+
 export async function logout({ daCtx, env }) {
-  await Promise.all(daCtx.users.map((u) => env.DA_AUTH.delete(u.ident)));
+  // The IMS path caches under the bare ident; the Okta-derived path (see setOktaGroupUser
+  // below) caches under a TST_CACHE_PREFIX-prefixed key instead, so a signed-out user's
+  // cached group membership needs its own delete — otherwise it just sits there, readable
+  // until its own (capped) TTL lapses. A KV delete on a key that was never set is a harmless
+  // no-op, so it's safe to always issue both.
+  await Promise.all(daCtx.users.flatMap((u) => [
+    env.DA_AUTH.delete(u.ident),
+    env.DA_AUTH.delete(`${TST_CACHE_PREFIX}${u.ident}`),
+  ]));
   return { status: 200 };
 }
 
@@ -108,7 +121,11 @@ async function storeJWSInCache(env, keysUrl, keysCache) {
   }
 }
 
-const TST_PREFIX = 'hlxtst_';
+// Group membership should read as reasonably fresh — cap how long a resolved identity is
+// trusted even when the token itself is longer-lived, mirroring Flow Manager's own 30-minute
+// choice for the same trade-off (userSyncService.ts: "removing user from groups immediately
+// revokes access").
+const OKTA_GROUPS_CACHE_TTL_SECONDS = 30 * 60;
 
 // Mirrors da-admin's own org/site extraction (utils/daCtx.js) so the transient site token's
 // `aud` claim (`{site}--{org}.{domain}`, minted by helix-admin) can be checked against the
@@ -123,12 +140,76 @@ function orgSiteFromUrl(url) {
   return { org, site };
 }
 
+// Looks up a user's Okta group membership directly against the Access-Manager-administered
+// org's Management API (mirrors Flow Manager's userSyncService.ts: search by email, then
+// list that user's groups) — not Access Manager's own grants API, which is still
+// FedRAMP-blocked. Returns [] (not an error) on any failure: an Okta hiccup should degrade to
+// "no groups", not deny the request entirely or throw past the caller.
+async function fetchOktaGroupNames(email, env) {
+  if (!env.OKTA_DOMAIN || !env.OKTA_API_TOKEN) return [];
+
+  const headers = {
+    authorization: `SSWS ${env.OKTA_API_TOKEN}`,
+    accept: 'application/json',
+  };
+
+  try {
+    const search = `profile.email eq "${email.replace(/"/g, '\\"')}"`;
+    const userResp = await fetch(
+      `https://${env.OKTA_DOMAIN}/api/v1/users?limit=1&search=${encodeURIComponent(search)}`,
+      { headers },
+    );
+    if (!userResp.ok) return [];
+    const [oktaUser] = await userResp.json();
+    if (!oktaUser || oktaUser.status !== 'ACTIVE') return [];
+
+    const groupsResp = await fetch(
+      `https://${env.OKTA_DOMAIN}/api/v1/users/${oktaUser.id}/groups?limit=200`,
+      { headers },
+    );
+    if (!groupsResp.ok) return [];
+    const groups = await groupsResp.json();
+    return groups.map((g) => g.profile?.name).filter(Boolean);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('Okta group lookup failed', e);
+    return [];
+  }
+}
+
+// Resolves and caches the identity for a verified transient site token, mirroring setUser()'s
+// shape for the IMS path. The Okta org itself stands in for "this deployment's org" — unlike
+// IMS, Access-Manager-Okta has no per-user multi-org concept, so orgIdent is the org's own
+// domain (stable, unique per deployment, self-documenting in permissions.data) rather than a
+// dynamic per-org value. Real group names carry the actual permission distinctions.
+async function setOktaGroupUser(sub, expiresAtSeconds, env) {
+  const groupNames = await fetchOktaGroupNames(sub, env);
+  const value = JSON.stringify({
+    email: sub,
+    ident: sub,
+    orgs: groupNames.length ? [{
+      orgName: env.OKTA_DOMAIN,
+      orgIdent: env.OKTA_DOMAIN,
+      groups: groupNames.map((groupName) => ({ groupName })),
+    }] : [],
+  });
+
+  const cacheKey = `${TST_CACHE_PREFIX}${sub}`;
+  const groupsCacheCutoff = Math.floor(Date.now() / 1000) + OKTA_GROUPS_CACHE_TTL_SECONDS;
+  const expiration = Math.min(expiresAtSeconds, groupsCacheCutoff);
+  try {
+    await env.DA_AUTH.put(cacheKey, value, { expiration });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to cache Okta-derived user in KV', e);
+  }
+  return value;
+}
+
 // Verifies a transient site token (hlxtst_...) minted by helix-admin for exactly this
 // "trust another service's identity/access check" purpose (see helix-admin's
-// getTransientSiteTokenInfo). Unlike an IMS access_token, it carries no org/group
-// membership — it identifies the user, but grants nothing beyond what a site's ACLs already
-// allow with no group match, until a direct Okta group lookup (a separate change) attaches
-// real group data for Okta-authenticated users.
+// getTransientSiteTokenInfo), then resolves the verified identity's Okta group membership
+// (cached — see setOktaGroupUser) for real, group-based authorization.
 async function parseTransientSiteToken(rawToken, req, env) {
   const token = rawToken.slice(TST_PREFIX.length);
   const { org, site } = orgSiteFromUrl(req.url);
@@ -142,6 +223,7 @@ async function parseTransientSiteToken(rawToken, req, env) {
   if (org.includes('--') || site.includes('--')) return { email: 'anonymous' };
 
   const keysURL = `https://admin.${env.HLX_PROD_SERVER_HOST_PAGE}/auth/discovery/keys`;
+  let payload;
   try {
     const keysCache = await getPreviouslyCachedJWKS(env, keysURL);
     const { uat } = keysCache;
@@ -155,24 +237,31 @@ async function parseTransientSiteToken(rawToken, req, env) {
       },
     );
 
-    const { payload } = await jwtVerify(token, jwks, {
+    ({ payload } = await jwtVerify(token, jwks, {
       audience: [
         `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
         `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
       ],
-    });
+    }));
 
     if (uat !== keysCache.uat) {
       await storeJWSInCache(env, keysURL, keysCache);
     }
-
-    if (!payload.sub) return { email: 'anonymous' };
-    return { email: payload.sub, ident: payload.sub, orgs: [] };
   } catch (e) {
     // eslint-disable-next-line no-console
     console.log('transient site token verification failed', e);
     return { email: 'anonymous' };
   }
+
+  if (!payload.sub) return { email: 'anonymous' };
+
+  const cacheKey = `${TST_CACHE_PREFIX}${payload.sub}`;
+  let user = await env.DA_AUTH.get(cacheKey);
+  if (!user) {
+    user = await setOktaGroupUser(payload.sub, payload.exp, env);
+  }
+  if (!user) return { email: 'anonymous' };
+  return JSON.parse(user);
 }
 
 export async function getUsers(req, env) {
