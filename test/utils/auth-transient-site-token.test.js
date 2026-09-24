@@ -42,6 +42,51 @@ function stubDiscoveryKeys(keys) {
   };
 }
 
+// Like stubDiscoveryKeys, plus Okta's Management API. oktaUsers/oktaGroupsById let each test
+// define exactly what a real Okta org would return, keyed by the URL the code actually hits.
+function stubDiscoveryAndOkta({
+  keys, oktaDomain, oktaUsersByEmail = {}, oktaGroupsById = {}, onOktaRequest,
+}) {
+  const saved = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = url.toString();
+    if (u === KEYS_URL) {
+      return { ok: true, status: 200, json: async () => ({ keys }) };
+    }
+    if (u.startsWith(`https://${oktaDomain}/api/v1/users?`)) {
+      onOktaRequest?.(u, opts);
+      const match = u.match(/search=(.+)$/)[1];
+      const email = decodeURIComponent(match).match(/"([^"]+)"/)[1];
+      const user = oktaUsersByEmail[email];
+      return { ok: true, status: 200, json: async () => (user ? [user] : []) };
+    }
+    const groupsMatch = u.match(/^https:\/\/([^/]+)\/api\/v1\/users\/([^/]+)\/groups/);
+    if (groupsMatch) {
+      onOktaRequest?.(u, opts);
+      const [, , userId] = groupsMatch;
+      return { ok: true, status: 200, json: async () => (oktaGroupsById[userId] || []) };
+    }
+    throw new Error(`unexpected fetch in test: ${u}`);
+  };
+  return () => {
+    globalThis.fetch = saved;
+  };
+}
+
+function memoryKvStore() {
+  const store = new Map();
+  const puts = [];
+  return {
+    get: async (key) => store.get(key),
+    put: async (key, value, options) => {
+      store.set(key, value);
+      puts.push({ key, value, options });
+    },
+    puts,
+    _store: store,
+  };
+}
+
 async function signSiteToken(privateKey, {
   org = 'owner', site = 'repo', domain = HLX_PROD_SERVER_HOST_PAGE, sub = 'author@example.com', expSecondsFromNow = 3600, kid = 'hlxtst-1',
 } = {}) {
@@ -134,5 +179,165 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
     const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
     const users = await getUsers(req('/list', token), ENV);
     assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  describe('Okta group membership', () => {
+    const OKTA_DOMAIN = 'test-tenant.okta.com';
+
+    it('attaches real group names under a fixed org keyed on the Okta domain', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'ACTIVE' } },
+        oktaGroupsById: {
+          'okta-user-1': [
+            { profile: { name: 'ssa-editors' } },
+            { profile: { name: 'ssa-admins' } },
+          ],
+        },
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      const users = await getUsers(req('/source/owner/repo/', token), env);
+      assert.deepStrictEqual(users, [{
+        email: 'author@example.com',
+        ident: 'author@example.com',
+        orgs: [{
+          orgName: OKTA_DOMAIN,
+          orgIdent: OKTA_DOMAIN,
+          groups: [{ groupName: 'ssa-editors' }, { groupName: 'ssa-admins' }],
+        }],
+      }]);
+    });
+
+    it('sends the Okta API token as an SSWS header', async () => {
+      let sawAuthHeader;
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'ACTIVE' } },
+        oktaGroupsById: { 'okta-user-1': [] },
+        onOktaRequest: (_, opts) => {
+          sawAuthHeader = opts.headers.authorization;
+        },
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(sawAuthHeader, 'SSWS test-token');
+    });
+
+    it('caches the resolved identity — a second request does not re-query Okta', async () => {
+      let oktaRequestCount = 0;
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'ACTIVE' } },
+        oktaGroupsById: { 'okta-user-1': [{ profile: { name: 'ssa-editors' } }] },
+        onOktaRequest: () => { oktaRequestCount += 1; },
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      await getUsers(req('/source/owner/repo/', token), env);
+      await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(oktaRequestCount, 2, 'expected exactly one user-search + one groups call, not four');
+    });
+
+    it('treats a user not found in Okta as no groups, not an error', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk], oktaDomain: OKTA_DOMAIN, oktaUsersByEmail: {},
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      const users = await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(users[0].email, 'author@example.com');
+      assert.deepStrictEqual(users[0].orgs, []);
+    });
+
+    it('treats a non-ACTIVE Okta user as no groups, not an error', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'SUSPENDED' } },
+        // Real groups are available at this id — proves a suspended user is denied them
+        // specifically because of the status check, not because Okta has nothing to return.
+        oktaGroupsById: { 'okta-user-1': [{ profile: { name: 'ssa-editors' } }] },
+      });
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      const users = await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(users[0].email, 'author@example.com');
+      assert.deepStrictEqual(users[0].orgs, [], 'a suspended Okta user must not inherit group-based access');
+    });
+
+    it('caps the cached identity at a 30-minute TTL even when the token lives much longer', async () => {
+      restoreFetch = stubDiscoveryAndOkta({
+        keys: [publicJwk],
+        oktaDomain: OKTA_DOMAIN,
+        oktaUsersByEmail: { 'author@example.com': { id: 'okta-user-1', status: 'ACTIVE' } },
+        oktaGroupsById: { 'okta-user-1': [{ profile: { name: 'ssa-editors' } }] },
+      });
+      const kv = memoryKvStore();
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: kv,
+      };
+      // A 24-hour-lived token — if the cache TTL weren't capped, it'd be cached that long too.
+      const token = await signSiteToken(privateKey, {
+        org: 'owner', site: 'repo', expSecondsFromNow: 24 * 60 * 60,
+      });
+
+      const before = Math.floor(Date.now() / 1000);
+      await getUsers(req('/source/owner/repo/', token), env);
+      const after = Math.floor(Date.now() / 1000);
+
+      // auth.js's own TST_CACHE_PREFIX, mirrored here rather than imported (not exported).
+      const put = kv.puts.find((p) => p.key.startsWith('hlxtst:'));
+      assert.ok(put, 'expected a hlxtst:-prefixed cache write');
+      assert.ok(
+        put.options.expiration <= after + 30 * 60,
+        `expiration ${put.options.expiration} not capped at ~30 minutes from now (${after})`,
+      );
+      assert.ok(
+        put.options.expiration >= before + 29 * 60,
+        `expiration ${put.options.expiration} capped far more aggressively than 30 minutes`,
+      );
+    });
+
+    it('treats an Okta API error as no groups, not an error', async () => {
+      const saved = globalThis.fetch;
+      globalThis.fetch = async (url) => {
+        if (url.toString() === KEYS_URL) {
+          return { ok: true, status: 200, json: async () => ({ keys: [publicJwk] }) };
+        }
+        return { ok: false, status: 500, json: async () => ({}) };
+      };
+      restoreFetch = () => {
+        globalThis.fetch = saved;
+      };
+
+      const env = {
+        ...ENV, OKTA_DOMAIN, OKTA_API_TOKEN: 'test-token', DA_AUTH: memoryKvStore(),
+      };
+      const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+      const users = await getUsers(req('/source/owner/repo/', token), env);
+      assert.strictEqual(users[0].email, 'author@example.com');
+      assert.deepStrictEqual(users[0].orgs, []);
+    });
   });
 });

@@ -18,11 +18,15 @@
 #   DA_AUTH_KV_ID / DA_CONFIG_KV_ID / DA_JOBS_KV_ID   KV namespace IDs (cloudflare/00-foundation)
 #   HLX_PROD_SERVER_HOST_PAGE / HLX_PROD_SERVER_HOST_LIVE
 #
-# Secrets (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, IMS_ORIGIN, DA_OPS_IMS_ORG) are NOT
-# templated — they're pushed via `wrangler secret put` by ams-eds-terraform's
-# populate-secrets.sh. DA_OPS_IMS_ORG (IMS org granted ops rights, read by
+# Secrets (S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, IMS_ORIGIN, DA_OPS_IMS_ORG, OKTA_DOMAIN,
+# OKTA_API_TOKEN) are NOT templated — they're pushed via `wrangler secret put` by
+# ams-eds-terraform's populate-secrets.sh. DA_OPS_IMS_ORG (IMS org granted ops rights, read by
 # src/utils/auth.js) is sourced from the operator-entered da_ops_ims_org tfvar; when
 # unset the worker's `if (env.DA_OPS_IMS_ORG)` guard simply no-ops.
+# OKTA_DOMAIN / OKTA_API_TOKEN (the Access-Manager-administered Okta org's domain and a
+# Management API token scoped to it, read by src/utils/auth.js's Okta group-membership
+# lookup for the transient-site-token identity path) are optional the same way — when either
+# is unset, that lookup no-ops to an empty group list rather than failing the request.
 
 name = "da-admin-ams-${NODE_ENV}"
 main = "src/index.js"
