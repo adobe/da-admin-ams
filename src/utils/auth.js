@@ -213,14 +213,26 @@ async function setOktaGroupUser(sub, expiresAtSeconds, env) {
 async function parseTransientSiteToken(rawToken, req, env) {
   const token = rawToken.slice(TST_PREFIX.length);
   const { org, site } = orgSiteFromUrl(req.url);
-  if (!org || !site) return { email: 'anonymous' };
+  if (!org) return { email: 'anonymous' };
   // The audience check below joins org/site with '--', which isn't collision-free if either
   // legally contained '--' itself (site="a--b", org="c" and site="a", org="b--c" both produce
   // the same joined string) — a token validly signed for one org/site could then pass the
   // audience check for a different one. '--' is already EDS's own reserved separator
   // elsewhere (e.g. main--site--org hostnames), so this shouldn't occur in practice, but
   // reject rather than rely on that upstream constraint holding here as well.
-  if (org.includes('--') || site.includes('--')) return { email: 'anonymous' };
+  if (org.includes('--') || site?.includes('--')) return { email: 'anonymous' };
+
+  // Org-only requests (no site — e.g. listing an org's sites) have no site to scope a
+  // token's audience to, so only the alt provider's account-level token (minted with a bare
+  // domain audience — see helix-admin's getTransientAccountTokenInfo) can satisfy them. This
+  // only authenticates the identity; the ACL sheet still decides what that identity can
+  // actually do with it.
+  const audience = site
+    ? [
+      `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
+      `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
+    ]
+    : [env.HLX_PROD_SERVER_HOST_PAGE, env.HLX_PROD_SERVER_HOST_LIVE];
 
   const keysURL = `https://admin.${env.HLX_PROD_SERVER_HOST_PAGE}/auth/discovery/keys`;
   let payload;
@@ -237,12 +249,7 @@ async function parseTransientSiteToken(rawToken, req, env) {
       },
     );
 
-    ({ payload } = await jwtVerify(token, jwks, {
-      audience: [
-        `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
-        `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
-      ],
-    }));
+    ({ payload } = await jwtVerify(token, jwks, { audience }));
 
     if (uat !== keysCache.uat) {
       await storeJWSInCache(env, keysURL, keysCache);

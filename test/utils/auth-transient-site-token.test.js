@@ -98,6 +98,19 @@ async function signSiteToken(privateKey, {
     .sign(privateKey);
 }
 
+// Mirrors helix-admin's getTransientAccountTokenInfo: identity-only, no org/site, so the
+// audience is just the bare domain rather than a site--org pair.
+async function signAccountToken(privateKey, {
+  domain = HLX_PROD_SERVER_HOST_PAGE, sub = 'author@example.com', expSecondsFromNow = 3600, kid = 'hlxtst-1',
+} = {}) {
+  return new SignJWT({})
+    .setProtectedHeader({ alg: 'RS256', kid })
+    .setAudience(domain)
+    .setSubject(sub)
+    .setExpirationTime(Math.floor(Date.now() / 1000) + expSecondsFromNow)
+    .sign(privateKey);
+}
+
 function req(path, token) {
   return new Request(`https://admin.${HLX_PROD_SERVER_HOST_PAGE}${path}`, {
     headers: { Authorization: `Bearer hlxtst_${token}` },
@@ -177,6 +190,37 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
 
   it('falls back to anonymous when the requested path has no org/site', async () => {
     const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+    const users = await getUsers(req('/list', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  it('accepts the account-level token for an org-only request (no site) — e.g. listing an '
+    + "org's sites — since a site-scoped audience can't be formed without one", async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey);
+
+    const users = await getUsers(req('/list/owner', token), ENV);
+    assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('accepts the account-level token scoped to the live domain for an org-only request', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey, { domain: HLX_PROD_SERVER_HOST_LIVE });
+
+    const users = await getUsers(req('/list/owner', token), ENV);
+    assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('rejects a site-scoped token for an org-only request (aud mismatch)', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+    const users = await getUsers(req('/list/owner', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  it('still requires an org even for an account-level token', async () => {
+    const token = await signAccountToken(privateKey);
     const users = await getUsers(req('/list', token), ENV);
     assert.strictEqual(users[0].email, 'anonymous');
   });
