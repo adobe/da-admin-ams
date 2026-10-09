@@ -140,7 +140,7 @@ function orgSiteFromUrl(url) {
   return { org, site };
 }
 
-// Looks up a user's Okta group membership directly against the Access-Manager-administered
+// Looks up a user's Okta group membership directly against the deployment's Okta
 // org's Management API (mirrors Flow Manager's userSyncService.ts: search by email, then
 // list that user's groups) — not Access Manager's own grants API, which is still
 // FedRAMP-blocked. Returns [] (not an error) on any failure: an Okta hiccup should degrade to
@@ -179,7 +179,7 @@ async function fetchOktaGroupNames(email, env) {
 
 // Resolves and caches the identity for a verified transient site token, mirroring setUser()'s
 // shape for the IMS path. The Okta org itself stands in for "this deployment's org" — unlike
-// IMS, Access-Manager-Okta has no per-user multi-org concept, so orgIdent is the org's own
+// IMS, the Okta idp has no per-user multi-org concept, so orgIdent is the org's own
 // domain (stable, unique per deployment, self-documenting in permissions.data) rather than a
 // dynamic per-org value. Real group names carry the actual permission distinctions.
 async function setOktaGroupUser(sub, expiresAtSeconds, env) {

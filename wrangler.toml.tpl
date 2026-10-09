@@ -23,7 +23,7 @@
 # ams-eds-terraform's populate-secrets.sh. DA_OPS_IMS_ORG (IMS org granted ops rights, read by
 # src/utils/auth.js) is sourced from the operator-entered da_ops_ims_org tfvar; when
 # unset the worker's `if (env.DA_OPS_IMS_ORG)` guard simply no-ops.
-# OKTA_DOMAIN / OKTA_API_TOKEN (the Access-Manager-administered Okta org's domain and a
+# OKTA_DOMAIN / OKTA_API_TOKEN (the Okta org's domain and a
 # Management API token scoped to it, read by src/utils/auth.js's Okta group-membership
 # lookup for the transient-site-token identity path) are optional the same way — when either
 # is unset, that lookup no-ops to an empty group list rather than failing the request.
