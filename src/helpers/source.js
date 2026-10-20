@@ -25,7 +25,7 @@ export function sourceRespObject(env, daCtx) {
   const obj = {
     source: {
       editUrl: `https://${env.DA_DOMAIN}/${isFile ? 'edit#/' : ''}${org}${pathname}`,
-      contentUrl: `https://content.${env.DA_DOMAIN}/${org}${pathname}`,
+      contentUrl: `${env.DA_CONTENT}/${org}${pathname}`,
     },
   };
 

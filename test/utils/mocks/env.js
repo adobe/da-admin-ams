@@ -34,6 +34,7 @@ const DA_CONFIG = {
 };
 
 const env = {
+  DA_CONTENT: process.env.DA_CONTENT || 'BAD_VAR_da-admin-ams_DA_CONTENT',
   S3_DEF_URL: 'https://s3.com',
   S3_ACCESS_KEY_ID: 'an-id',
   S3_SECRET_ACCESS_KEY: 'too-many-secrets',

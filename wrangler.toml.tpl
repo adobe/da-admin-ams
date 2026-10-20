@@ -14,6 +14,7 @@
 #   NODE_ENV                     short env name (worker name suffix + service bindings)
 #   CLOUDFLARE_ACCOUNT_ID        Cloudflare account ID
 #   DA_DOMAIN                    DA domain (route host + zone)
+#   DA_DOMAIN_CONTENT            DA content domain (DA_CONTENT source content links)
 #   AEM_BUCKET_NAME              DA content R2 bucket name
 #   DA_AUTH_KV_ID / DA_CONFIG_KV_ID / DA_JOBS_KV_ID   KV namespace IDs (cloudflare/00-foundation)
 #   HLX_PROD_SERVER_HOST_PAGE / HLX_PROD_SERVER_HOST_LIVE
@@ -62,6 +63,7 @@ VERSION = "@@VERSION@@"
 ENVIRONMENT = "${NODE_ENV}"
 DA_DOMAIN = "${DA_DOMAIN}"
 DA_COLLAB = "collab.${DA_DOMAIN}"
+DA_CONTENT = "https://${DA_DOMAIN_CONTENT}"
 AEM_BUCKET_NAME = "${AEM_BUCKET_NAME}"
 HLX_PROD_SERVER_HOST_PAGE = "${HLX_PROD_SERVER_HOST_PAGE}"
 HLX_PROD_SERVER_HOST_LIVE = "${HLX_PROD_SERVER_HOST_LIVE}"
