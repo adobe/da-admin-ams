@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import assert from 'node:assert';
-import { putHelper } from '../../src/helpers/source.js';
+import { putHelper, sourceRespObject } from '../../src/helpers/source.js';
 
 import env from '../utils/mocks/env.js';
 
@@ -19,6 +19,48 @@ const daCtx = { org: 'cq', key: 'geometrixx/hello.html', propsKey: 'geometrixx/h
 const MOCK_URL = `https://${env.DA_DOMAIN}/source/cq/geometrixx/hello`;
 
 describe('Source helper', () => {
+  describe('sourceRespObject', () => {
+    it('builds contentUrl from env.DA_CONTENT', () => {
+      const obj = sourceRespObject(
+        { DA_CONTENT: 'https://stage-content.da.live', DA_DOMAIN: env.DA_DOMAIN },
+        { org: 'cq', pathname: '/geometrixx/hello.html' },
+      );
+      assert.strictEqual(obj.source.contentUrl, 'https://stage-content.da.live/cq/geometrixx/hello.html');
+      assert.strictEqual(obj.source.editUrl, `https://${env.DA_DOMAIN}/cq/geometrixx/hello.html`);
+    });
+
+    it('uses production DA_CONTENT when provided', () => {
+      const obj = sourceRespObject(
+        { DA_CONTENT: 'https://content.da.live' },
+        { org: 'cq', pathname: '/geometrixx/hello.html' },
+      );
+      assert.strictEqual(obj.source.contentUrl, 'https://content.da.live/cq/geometrixx/hello.html');
+    });
+
+    it('adds aem urls when site is present', () => {
+      const obj = sourceRespObject(
+        {
+          DA_CONTENT: 'https://content.da.live',
+          HLX_PROD_SERVER_HOST_PAGE: env.HLX_PROD_SERVER_HOST_PAGE,
+          HLX_PROD_SERVER_HOST_LIVE: env.HLX_PROD_SERVER_HOST_LIVE,
+        },
+        {
+          org: 'cq', site: 'geometrixx', pathname: '/index.html', aemPathname: '/index',
+        },
+      );
+      assert.strictEqual(obj.aem.previewUrl, `https://main--geometrixx--cq.${env.HLX_PROD_SERVER_HOST_PAGE}/index`);
+      assert.strictEqual(obj.aem.liveUrl, `https://main--geometrixx--cq.${env.HLX_PROD_SERVER_HOST_LIVE}/index`);
+    });
+
+    it('uses edit#/ prefix for files', () => {
+      const obj = sourceRespObject(
+        { DA_CONTENT: 'https://content.da.live', DA_DOMAIN: env.DA_DOMAIN },
+        { org: 'cq', isFile: true, pathname: '/geometrixx/hello.html' },
+      );
+      assert.strictEqual(obj.source.editUrl, `https://${env.DA_DOMAIN}/edit#/cq/geometrixx/hello.html`);
+    });
+  });
+
   describe('Put success', async () => {
     it('Returns null if no content type', async () => {
       const req = new Request(MOCK_URL);
