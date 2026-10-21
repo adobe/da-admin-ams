@@ -1,3 +1,52 @@
+## [1.15.1](https://github.com/adobe/da-admin/compare/v1.15.0...v1.15.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#313](https://github.com/adobe/da-admin/issues/313)) ([ccafa3c](https://github.com/adobe/da-admin/commit/ccafa3cd8f32f4ab15d4dcba510183629bac53e2))
+
+# [1.15.0](https://github.com/adobe/da-admin/compare/v1.14.1...v1.15.0) (2026-08-07)
+
+
+### Features
+
+* derive source contentUrl from DA_CONTENT env var ([#312](https://github.com/adobe/da-admin/issues/312)) ([11e926f](https://github.com/adobe/da-admin/commit/11e926f34c6225bea4efa262faba383bc8a25a77))
+
+## [1.14.1](https://github.com/adobe/da-admin/compare/v1.14.0...v1.14.1) (2026-08-06)
+
+
+### Bug Fixes
+
+* HEAD /list 500 crash when caller has no read permission ([#311](https://github.com/adobe/da-admin/issues/311)) ([5658b63](https://github.com/adobe/da-admin/commit/5658b636fce92c850fa3f3d46269c4c63da9b250))
+
+# [1.14.0](https://github.com/adobe/da-admin/compare/v1.13.6...v1.14.0) (2026-08-04)
+
+
+### Features
+
+* tag MCP-initiated writes as agent in version history ([#310](https://github.com/adobe/da-admin/issues/310)) ([ae50c1b](https://github.com/adobe/da-admin/commit/ae50c1bcfbada69e0ac76747b09905eef1d821df)), closes [#309](https://github.com/adobe/da-admin/issues/309)
+
+## [1.13.6](https://github.com/adobe/da-admin/compare/v1.13.5...v1.13.6) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#239](https://github.com/adobe/da-admin/issues/239)) ([f7a851a](https://github.com/adobe/da-admin/commit/f7a851ae38d4bb9e5e9ff9c4468ae36057fda681))
+
+## [1.13.5](https://github.com/adobe/da-admin/compare/v1.13.4...v1.13.5) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps:** update external major (major) ([#297](https://github.com/adobe/da-admin/issues/297)) ([427606d](https://github.com/adobe/da-admin/commit/427606d60c01268ed56671fd290d38d6dd0c37c7))
+
+## [1.13.4](https://github.com/adobe/da-admin/compare/v1.13.3...v1.13.4) (2026-08-03)
+
+
+### Bug Fixes
+
+* return 422 instead of 500 for non-versionable labelled version requests ([#308](https://github.com/adobe/da-admin/issues/308)) ([dc03b91](https://github.com/adobe/da-admin/commit/dc03b9198f276735c3d34d09984332fde0a9ea9e)), closes [#288](https://github.com/adobe/da-admin/issues/288)
+
 ## [1.13.3](https://github.com/adobe/da-admin/compare/v1.13.2...v1.13.3) (2026-07-23)
 
 
