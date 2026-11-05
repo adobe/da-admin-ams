@@ -227,10 +227,14 @@ async function parseTransientSiteToken(rawToken, req, env) {
   // domain audience — see helix-admin's getTransientAccountTokenInfo) can satisfy them. This
   // only authenticates the identity; the ACL sheet still decides what that identity can
   // actually do with it.
+  // Site paths also accept `<site>--<org>.<DA_DOMAIN>`: helix-admin's short-lived token for a
+  // site that has no helix config yet (DA's /start). Only DA accepts that audience — the
+  // delivery worker matches page/live hosts only — so it grants no preview/live access.
   const audience = site
     ? [
       `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
       `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
+      ...(env.DA_DOMAIN ? [`${site}--${org}.${env.DA_DOMAIN}`] : []),
     ]
     : [env.HLX_PROD_SERVER_HOST_PAGE, env.HLX_PROD_SERVER_HOST_LIVE];
 

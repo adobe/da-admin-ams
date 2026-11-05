@@ -21,6 +21,7 @@ import { getUsers } from '../../src/utils/auth.js';
 
 const HLX_PROD_SERVER_HOST_PAGE = 'gov-aem.page';
 const HLX_PROD_SERVER_HOST_LIVE = 'gov-aem.live';
+const DA_DOMAIN = 'gov-da.live';
 const KEYS_URL = `https://admin.${HLX_PROD_SERVER_HOST_PAGE}/auth/discovery/keys`;
 
 const ENV = {
@@ -148,6 +149,44 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
 
     const users = await getUsers(req('/source/owner/repo/', token), ENV);
     assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('accepts a token scoped to the DA domain (unconfigured-site token from helix-admin)', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signSiteToken(privateKey, {
+      org: 'owner', site: 'repo', domain: DA_DOMAIN,
+    });
+
+    const users = await getUsers(req('/source/owner/repo/', token), { ...ENV, DA_DOMAIN });
+    assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('rejects a DA-domain token when DA_DOMAIN is not configured', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signSiteToken(privateKey, {
+      org: 'owner', site: 'repo', domain: DA_DOMAIN,
+    });
+
+    const users = await getUsers(req('/source/owner/repo/', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  it('rejects a DA-domain token minted for a different site', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signSiteToken(privateKey, {
+      org: 'owner', site: 'other-repo', domain: DA_DOMAIN,
+    });
+
+    const users = await getUsers(req('/source/owner/repo/', token), { ...ENV, DA_DOMAIN });
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  it('rejects a bare DA-domain audience for an org-only request', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey, { domain: DA_DOMAIN });
+
+    const users = await getUsers(req('/list/owner', token), { ...ENV, DA_DOMAIN });
+    assert.strictEqual(users[0].email, 'anonymous');
   });
 
   it('rejects a token minted for a different site (aud mismatch)', async () => {
