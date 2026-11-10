@@ -225,6 +225,39 @@ describe('DA auth: transient site token (hlxtst_...)', () => {
     assert.strictEqual(users[0].email, 'anonymous');
   });
 
+  it('accepts the account-level token on an org-level dot folder (e.g. /<org>/.da/...), '
+    + 'which can never have a site token', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey);
+
+    const users = await getUsers(req('/source/owner/.da/aem-permission-requests.json', token), ENV);
+    assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('accepts the account-level token scoped to the live domain on an org-level dot folder', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey, { domain: HLX_PROD_SERVER_HOST_LIVE });
+
+    const users = await getUsers(req('/source/owner/.da/aem-permission-requests.json', token), ENV);
+    assert.strictEqual(users[0].email, 'author@example.com');
+  });
+
+  it('rejects a site-scoped token on an org-level dot folder (aud mismatch)', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signSiteToken(privateKey, { org: 'owner', site: 'repo' });
+
+    const users = await getUsers(req('/source/owner/.da/aem-permission-requests.json', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
+  it('still rejects the account-level token on a site path', async () => {
+    restoreFetch = stubDiscoveryKeys([publicJwk]);
+    const token = await signAccountToken(privateKey);
+
+    const users = await getUsers(req('/source/owner/repo/index.html', token), ENV);
+    assert.strictEqual(users[0].email, 'anonymous');
+  });
+
   describe('Okta group membership', () => {
     const OKTA_DOMAIN = 'test-tenant.okta.com';
 

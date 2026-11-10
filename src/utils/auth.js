@@ -226,8 +226,10 @@ async function parseTransientSiteToken(rawToken, req, env) {
   // token's audience to, so only the alt provider's account-level token (minted with a bare
   // domain audience — see helix-admin's getTransientAccountTokenInfo) can satisfy them. This
   // only authenticates the identity; the ACL sheet still decides what that identity can
-  // actually do with it.
-  const audience = site
+  // actually do with it. The same applies to org-level dot folders (e.g. /<org>/.da/...):
+  // EDS site names can't start with '.', so helix-admin never mints a site token for them.
+  const siteScoped = site && !site.startsWith('.');
+  const audience = siteScoped
     ? [
       `${site}--${org}.${env.HLX_PROD_SERVER_HOST_PAGE}`,
       `${site}--${org}.${env.HLX_PROD_SERVER_HOST_LIVE}`,
