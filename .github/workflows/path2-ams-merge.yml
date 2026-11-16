@@ -138,6 +138,26 @@ jobs:
             echo "is_minor=false" >> $GITHUB_OUTPUT
             echo "trigger_reason=No new release — skipped" >> $GITHUB_OUTPUT
             echo "⏭️ Same version ($LATEST) — skipping AMS merge."
+
+            # Report-only: the version gate stays, but main may still have moved without a
+            # release (e.g. a renovate bump). Tell the Slack skip message whether main is
+            # ahead and whether a merge would conflict. Never fails the step: any error
+            # (including a git without `merge-tree --write-tree`, git < 2.38) → "unknown".
+            BEHIND=$(git rev-list --count HEAD..origin/${{ env.SOURCE_BRANCH }} 2>/dev/null || echo "unknown")
+            CONFLICT="unknown"
+            if [ "$BEHIND" != "unknown" ] && [ "$BEHIND" != "0" ]; then
+              MT_RC=0
+              git merge-tree --write-tree HEAD origin/${{ env.SOURCE_BRANCH }} >/dev/null 2>&1 || MT_RC=$?
+              # 0 = clean, 1 = conflicts, anything else = check unsupported/failed
+              if [ "$MT_RC" = "0" ]; then CONFLICT="false"
+              elif [ "$MT_RC" = "1" ]; then CONFLICT="true"
+              fi
+            elif [ "$BEHIND" = "0" ]; then
+              CONFLICT="false"
+            fi
+            echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+            echo "would_conflict=$CONFLICT" >> $GITHUB_OUTPUT
+            echo "main is ahead of ${{ env.AMS_BRANCH }} by $BEHIND commit(s); merge would conflict: $CONFLICT"
           fi
 
       - name: Check for Changes to Merge
@@ -279,15 +299,37 @@ jobs:
               "text": "⚠️ *Path 2 AMS Merge Conflict!*\n*Repo:* `${{ github.repository }}`\n*Version:* `${{ steps.version_check.outputs.latest_tag }}`\nCould not merge `${{ env.SOURCE_BRANCH }}` into `${{ env.AMS_BRANCH }}`.\n\nIssues are disabled on this repo (no tracking issue) -- resolve manually: fetch, merge, fix conflicts, push to `${{ env.AMS_BRANCH }}`, then re-run.\n*Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Failed Run>"
             }
 
-      - name: Notify Slack on Skipped (no new release)
-        if: steps.version_check.outputs.is_minor == 'false'
+      - name: Notify Slack on Skipped — main ahead, would conflict
+        if: steps.version_check.outputs.is_minor == 'false' && steps.version_check.outputs.would_conflict == 'true'
         uses: slackapi/slack-github-action@v2.0.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
           payload: |
             {
-              "text": "⏭️ *Path 2 Skipped — No New Release*\n*Repo:* `${{ github.repository }}`\n*`main` version:* `${{ steps.version_check.outputs.latest_tag }}` (unchanged — no merge needed)\n*`${{ env.AMS_BRANCH }}` version:* `${{ steps.version_check.outputs.ams_tag }}` (current, unchanged)\n*Next sync:* when main's release version next changes, or force_sync manually"
+              "text": "⚠️ *Path 2 Skipped — Same Version, but `${{ env.SOURCE_BRANCH }}` is ahead and would CONFLICT*\n*Repo:* `${{ github.repository }}`\n*Version:* `${{ steps.version_check.outputs.latest_tag }}` on both branches (version gate: no merge attempted)\n*`${{ env.SOURCE_BRANCH }}` is ahead of `${{ env.AMS_BRANCH }}` by:* ${{ steps.version_check.outputs.behind }} commit(s)\nA merge would conflict. Merge manually or run force_sync.\n*Workflow:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+            }
+
+      - name: Notify Slack on Skipped — main ahead, no conflict
+        if: steps.version_check.outputs.is_minor == 'false' && steps.version_check.outputs.would_conflict == 'false' && steps.version_check.outputs.behind != '0'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⏭️ *Path 2 Skipped — Same Version, `${{ env.SOURCE_BRANCH }}` is ahead (no conflict)*\n*Repo:* `${{ github.repository }}`\n*Version:* `${{ steps.version_check.outputs.latest_tag }}` on both branches\n*`${{ env.SOURCE_BRANCH }}` is ahead of `${{ env.AMS_BRANCH }}` by:* ${{ steps.version_check.outputs.behind }} commit(s), not merged by design (releases only)\n*Next sync:* when the release version next changes, or force_sync manually"
+            }
+
+      - name: Notify Slack on Skipped (no new release)
+        if: steps.version_check.outputs.is_minor == 'false' && (steps.version_check.outputs.behind == '0' || steps.version_check.outputs.would_conflict == 'unknown')
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⏭️ *Path 2 Skipped — No New Release*\n*Repo:* `${{ github.repository }}`\n*`main` version:* `${{ steps.version_check.outputs.latest_tag }}` (unchanged)\n*`${{ env.AMS_BRANCH }}` version:* `${{ steps.version_check.outputs.ams_tag }}`\n*Commits on `${{ env.SOURCE_BRANCH }}` not in `${{ env.AMS_BRANCH }}`:* ${{ steps.version_check.outputs.behind }} (0 = up to date, unknown = could not be checked)\n*Next sync:* when main's release version next changes, or force_sync manually"
             }
 
       - name: Notify Slack on No Changes
