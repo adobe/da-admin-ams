@@ -4,9 +4,9 @@ DA (Document Authoring) admin Worker. Handles admin operations for the DA conten
 
 ## Rules
 
-@/Users/schmidt/Documents/git/eds_tools/ams-eds-terraform/.cursor/rules/cloudflare-workers-conventions.md
-@/Users/schmidt/Documents/git/eds_tools/ams-eds-terraform/.cursor/rules/cloudflare-workers-deployment.md
-@/Users/schmidt/Documents/git/eds_tools/ams-eds-terraform/.cursor/rules/development-standards-shared.md
+@../../eds_tools/ams-eds-terraform/.cursor/rules/cloudflare-workers-conventions.md
+@../../eds_tools/ams-eds-terraform/.cursor/rules/cloudflare-workers-deployment.md
+@../../eds_tools/ams-eds-terraform/.cursor/rules/development-standards-shared.md
 
 ## Stack
 
