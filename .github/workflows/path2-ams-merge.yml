@@ -21,6 +21,10 @@ env:
   AMS_BRANCH: ${{ vars.AMS_BRANCH || 'main-ams' }}         # main-ams (AMS customized branch)
   UPSTREAM_REPO: ${{ vars.UPSTREAM_REPO }}                  # e.g. adobe/da-admin
 
+concurrency:
+  group: path2-ams-merge-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   ams-merge:
     runs-on: ubuntu-latest
@@ -107,7 +111,7 @@ jobs:
           git fetch origin
 
           # Get version from package.json on main branch
-          LATEST=$(git show origin/${{ env.SOURCE_BRANCH }}:package.json | jq -r '.version')
+          LATEST=$(git show "origin/${{ env.SOURCE_BRANCH }}:package.json" | jq -r '.version')
           LATEST="v${LATEST}"
 
           # Get current version on main-ams branch (HEAD = main-ams)
@@ -143,11 +147,11 @@ jobs:
             # release (e.g. a renovate bump). Tell the Slack skip message whether main is
             # ahead and whether a merge would conflict. Never fails the step: any error
             # (including a git without `merge-tree --write-tree`, git < 2.38) → "unknown".
-            BEHIND=$(git rev-list --count HEAD..origin/${{ env.SOURCE_BRANCH }} 2>/dev/null || echo "unknown")
+            BEHIND=$(git rev-list --count "HEAD..origin/${{ env.SOURCE_BRANCH }}" 2>/dev/null || echo "unknown")
             CONFLICT="unknown"
             if [ "$BEHIND" != "unknown" ] && [ "$BEHIND" != "0" ]; then
               MT_RC=0
-              git merge-tree --write-tree HEAD origin/${{ env.SOURCE_BRANCH }} >/dev/null 2>&1 || MT_RC=$?
+              git merge-tree --write-tree HEAD "origin/${{ env.SOURCE_BRANCH }}" >/dev/null 2>&1 || MT_RC=$?
               # 0 = clean, 1 = conflicts, anything else = check unsupported/failed
               if [ "$MT_RC" = "0" ]; then CONFLICT="false"
               elif [ "$MT_RC" = "1" ]; then CONFLICT="true"
@@ -166,7 +170,7 @@ jobs:
         run: |
           git fetch origin
 
-          SOURCE_SHA=$(git rev-parse origin/${{ env.SOURCE_BRANCH }})
+          SOURCE_SHA=$(git rev-parse "origin/${{ env.SOURCE_BRANCH }}")
           AMS_SHA=$(git rev-parse HEAD)
 
           echo "Source (main) SHA: $SOURCE_SHA"
@@ -178,7 +182,7 @@ jobs:
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "⏭️ AMS branch already up to date — nothing to merge."
           else
-            BEHIND=$(git rev-list HEAD..origin/${{ env.SOURCE_BRANCH }} --count)
+            BEHIND=$(git rev-list "HEAD..origin/${{ env.SOURCE_BRANCH }}" --count)
             echo "commits_behind=$BEHIND" >> $GITHUB_OUTPUT
             if [ "$BEHIND" = "0" ]; then
               echo "has_changes=false" >> $GITHUB_OUTPUT
@@ -199,13 +203,13 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # Attempt fast-forward first (cleanest)
-          if git merge --ff-only origin/${{ env.SOURCE_BRANCH }}; then
+          if git merge --ff-only "origin/${{ env.SOURCE_BRANCH }}"; then
             echo "strategy=fast-forward" >> $GITHUB_OUTPUT
             echo "✅ Fast-forward merge successful."
 
           else
             # Fall back to merge commit — preserves existing AMS commit hashes (no rebase)
-            if git merge origin/${{ env.SOURCE_BRANCH }} --no-edit \
+            if git merge "origin/${{ env.SOURCE_BRANCH }}" --no-edit \
                 -m "chore(sync): merge main into ${{ env.AMS_BRANCH }}"; then
               echo "strategy=merge" >> $GITHUB_OUTPUT
               echo "✅ Merge successful."
@@ -220,8 +224,8 @@ jobs:
           # Use SOURCE_TOKEN — GITHUB_TOKEN cannot push .github/workflows/ files.
           # Unset the credential header set by checkout@v4, otherwise it overrides the remote URL token.
           git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git remote set-url origin https://x-access-token:${SOURCE_TOKEN}@github.com/${{ github.repository }}.git
-          git push origin ${{ env.AMS_BRANCH }}
+          git remote set-url origin "https://x-access-token:${SOURCE_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin "${{ env.AMS_BRANCH }}"
           SYNCED_SHA=$(git rev-parse HEAD)
           echo "synced_sha=$SYNCED_SHA" >> $GITHUB_OUTPUT
           echo "✅ AMS merge complete. Now at: $SYNCED_SHA"
